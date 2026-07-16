@@ -155,6 +155,24 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         }
 
         /// <summary>
+        /// Is this box a synthesized <c>::before</c> pseudo-element (see <see cref="CssData"/>'s selector-matching synthesis).
+        /// </summary>
+        public bool IsBeforePseudoElement { get; set; }
+
+        /// <summary>
+        /// Is this box a synthesized <c>::after</c> pseudo-element (see <see cref="CssData"/>'s selector-matching synthesis).
+        /// </summary>
+        public bool IsAfterPseudoElement { get; set; }
+
+        /// <summary>
+        /// Is this box a synthesized <c>::before</c>/<c>::after</c> pseudo-element.
+        /// </summary>
+        public bool IsPseudoElement
+        {
+            get { return IsBeforePseudoElement || IsAfterPseudoElement; }
+        }
+
+        /// <summary>
         /// is the box "Display" is "Inline", is this is an inline box and not block.
         /// </summary>
         public bool IsInline

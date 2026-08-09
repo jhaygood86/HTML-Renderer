@@ -17,6 +17,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 
 namespace TheArtOfDev.HtmlRenderer.Core.Utils
 {
@@ -180,6 +181,47 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
             { }
 
             return null;
+        }
+
+        /// <summary>
+        /// Resolves <paramref name="src"/> (a <c>src</c>/<c>href</c>/CSS <c>url()</c> reference, absolute
+        /// or relative) against the document's base URL: <paramref name="overrideBaseUri"/> when given (a
+        /// stylesheet's own URL, for resolving a nested <c>@import</c> or <c>@font-face src</c> relative to
+        /// where that stylesheet was fetched from, not the document's own base), else the document's
+        /// <c>&lt;base href&gt;</c> element if it has one, else the adapter's own
+        /// <see cref="Adapters.RAdapter.BaseUri"/>.
+        /// </summary>
+        /// <param name="htmlContainer">the html container to resolve the base URI against</param>
+        /// <param name="src">the (typically relative) reference to resolve</param>
+        /// <param name="overrideBaseUri">optional: resolve against this instead of the document's own base</param>
+        /// <returns>the resolved absolute URI, or null if it could not be resolved</returns>
+        public static RUri ResolveAgainstDocumentBase(TheArtOfDev.HtmlRenderer.Core.HtmlContainerInt htmlContainer, string src, RUri overrideBaseUri = null)
+        {
+            RUri baseUri;
+
+            if (overrideBaseUri != null)
+            {
+                baseUri = overrideBaseUri;
+            }
+            else
+            {
+                var baseElement = DomUtils.GetBoxByTagName(htmlContainer.Root, "base");
+                var baseHref = baseElement != null && baseElement.HtmlTag != null ? baseElement.HtmlTag.TryGetAttribute("href", "") : "";
+                baseUri = string.IsNullOrWhiteSpace(baseHref) ? htmlContainer.Adapter.BaseUri : new RUri(baseHref);
+            }
+
+            try
+            {
+                // Deliberately not pre-filtered with Uri.IsWellFormedUriString: it applies stricter
+                // generic-syntax rules than Uri's own parser and rejects some URIs Uri/RUri parse
+                // correctly (e.g. certain percent-encoded `data:` URIs). new RUri(base, src) resolves an
+                // absolute src as-is, so this handles absolute and relative references uniformly.
+                return baseUri == null ? new RUri(src, UriKind.RelativeOrAbsolute) : new RUri(baseUri, src);
+            }
+            catch (UriFormatException)
+            {
+                return null;
+            }
         }
 
         /// <summary>

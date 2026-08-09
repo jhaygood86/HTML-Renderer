@@ -12,6 +12,8 @@
 
 using System;
 using System.ComponentModel;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -69,6 +71,14 @@ namespace TheArtOfDev.HtmlRenderer.WPF
         /// The last position of the scrollbars to know if it has changed to update mouse
         /// </summary>
         protected Point _lastScrollOffset;
+
+        /// <summary>
+        /// Tracks the in-flight <see cref="SetTextAsync"/> call, if any, so a newer call can supersede an
+        /// older one still awaiting <see cref="HtmlContainer.SetHtml"/> - the stale call's post-await side
+        /// effects (invalidate/error reporting) are skipped once it resumes, checked by reference equality
+        /// against this field.
+        /// </summary>
+        private CancellationTokenSource _pendingLoad;
 
         #endregion
 
@@ -463,6 +473,48 @@ namespace TheArtOfDev.HtmlRenderer.WPF
         }
 
         /// <summary>
+        /// Sets the html of this control and awaits the async load - the real entry point behind the
+        /// <see cref="TextProperty"/>/<see cref="BaseStylesheetProperty"/> dependency-property callbacks,
+        /// for callers that want to await completion or cancel an in-flight load.
+        /// </summary>
+        /// <remarks>
+        /// A new call before a previous one finishes supersedes it: the previous call's
+        /// <see cref="HtmlContainer.SetHtml"/> keeps running (it has no mid-flight cancellation point of
+        /// its own) but its post-completion side effects - invalidate, error reporting - are discarded
+        /// once it resumes, so only the newest call's results ever reach the control.
+        /// </remarks>
+        /// <param name="html">the html to set</param>
+        /// <param name="cancellationToken">optional: cancel this specific call without affecting others</param>
+        public async Task SetTextAsync(string html, CancellationToken cancellationToken = default)
+        {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _pendingLoad?.Cancel();
+            _pendingLoad = cts;
+
+            try
+            {
+                await _htmlContainer.SetHtml(html, _baseCssData);
+            }
+            catch (Exception ex)
+            {
+                if (cts == _pendingLoad)
+                {
+                    OnRenderError(new HtmlRenderErrorEventArgs(HtmlRenderErrorType.General, "Failed to set html", ex));
+                }
+                return;
+            }
+
+            if (cts != _pendingLoad || cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            InvalidateMeasure();
+            InvalidateVisual();
+            InvokeMouseMove();
+        }
+
+        /// <summary>
         /// Handle when dependency property value changes to update the underline HtmlContainer with the new value.
         /// </summary>
         private static void OnDependencyProperty_valueChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
@@ -487,15 +539,12 @@ namespace TheArtOfDev.HtmlRenderer.WPF
                 {
                     var baseCssData = HtmlRender.ParseStyleSheet((string)e.NewValue);
                     control._baseCssData = baseCssData;
-                    htmlContainer.SetHtml(control.Text, baseCssData);
+                    _ = control.SetTextAsync(control.Text);
                 }
                 else if (e.Property == TextProperty)
                 {
                     htmlContainer.ScrollOffset = new Point(0, 0);
-                    htmlContainer.SetHtml((string)e.NewValue, control._baseCssData);
-                    control.InvalidateMeasure();
-                    control.InvalidateVisual();
-                    control.InvokeMouseMove();
+                    _ = control.SetTextAsync((string)e.NewValue);
                 }
             }
         }

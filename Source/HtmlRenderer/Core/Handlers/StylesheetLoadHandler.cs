@@ -6,15 +6,17 @@
 // like the days and months;
 // they die and are reborn,
 // like the four seasons."
-// 
+//
 // - Sun Tsu,
 // "The Art of War"
 
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
+using System.Linq;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 using TheArtOfDev.HtmlRenderer.Core.Utils;
 
 namespace TheArtOfDev.HtmlRenderer.Core.Handlers
@@ -28,19 +30,22 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
         /// Load stylesheet data from the given source.<br/>
         /// The source can be local file or web URI.<br/>
         /// First raise <see cref="HtmlStylesheetLoadEventArgs"/> event to allow the client to overwrite the stylesheet loading.<br/>
-        /// If the stylesheet is downloaded from URI we will try to correct local URIs to absolute.<br/>
+        /// If the event doesn't handle it, the reference is resolved against the document base and fetched
+        /// through <see cref="Adapters.RAdapter.GetResourceStream"/>, uniformly for local files, <c>data:</c>
+        /// URIs, and remote HTTP(S) sources.
         /// </summary>
         /// <param name="htmlContainer">the container of the html to handle load stylesheet for</param>
         /// <param name="src">the source of the element to load the stylesheet by</param>
         /// <param name="attributes">the attributes of the link element</param>
-        /// <param name="stylesheet">return the stylesheet string that has been loaded (null if failed or <paramref name="stylesheetData"/> is given)</param>
-        /// <param name="stylesheetData">return stylesheet data object that was provided by overwrite (null if failed or <paramref name="stylesheet"/> is given)</param>
-        public static void LoadStylesheet(HtmlContainerInt htmlContainer, string src, Dictionary<string, string> attributes, out string stylesheet, out CssData stylesheetData)
+        /// <returns>
+        /// the stylesheet string that has been loaded (empty if not found/failed, or if
+        /// <c>stylesheetData</c> is given instead), and the stylesheet data object provided by an event
+        /// overwrite (null unless the event set it).
+        /// </returns>
+        public static async Task<(string stylesheet, CssData stylesheetData)> LoadStylesheet(HtmlContainerInt htmlContainer, string src, Dictionary<string, string> attributes)
         {
             ArgChecker.AssertArgNotNull(htmlContainer, "htmlContainer");
 
-            stylesheet = null;
-            stylesheetData = null;
             try
             {
                 var args = new HtmlStylesheetLoadEventArgs(src, attributes);
@@ -48,24 +53,21 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
 
                 if (!string.IsNullOrEmpty(args.SetStyleSheet))
                 {
-                    stylesheet = args.SetStyleSheet;
+                    return (args.SetStyleSheet, null);
                 }
-                else if (args.SetStyleSheetData != null)
+
+                if (args.SetStyleSheetData != null)
                 {
-                    stylesheetData = args.SetStyleSheetData;
+                    return (null, args.SetStyleSheetData);
                 }
-                else if (args.SetSrc != null)
-                {
-                    stylesheet = LoadStylesheet(htmlContainer, args.SetSrc);
-                }
-                else
-                {
-                    stylesheet = LoadStylesheet(htmlContainer, src);
-                }
+
+                var stylesheet = await LoadStylesheet(htmlContainer, args.SetSrc ?? src).ConfigureAwait(false);
+                return (stylesheet, null);
             }
             catch (Exception ex)
             {
                 htmlContainer.ReportError(HtmlRenderErrorType.CssParsing, "Exception in handling stylesheet source", ex);
+                return (null, null);
             }
         }
 
@@ -73,75 +75,59 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
         #region Private methods
 
         /// <summary>
-        /// Load stylesheet string from given source (file path or uri).
+        /// Load stylesheet string from given source (file path or uri), resolved against the document base
+        /// and fetched through <see cref="Adapters.RAdapter.GetResourceStream"/>.
         /// </summary>
         /// <param name="htmlContainer">the container of the html to handle load stylesheet for</param>
         /// <param name="src">the file path or uri to load the stylesheet from</param>
-        /// <returns>the stylesheet string</returns>
-        private static string LoadStylesheet(HtmlContainerInt htmlContainer, string src)
+        /// <returns>the stylesheet string, or empty if it could not be resolved/loaded</returns>
+        private static async Task<string> LoadStylesheet(HtmlContainerInt htmlContainer, string src)
         {
-            var uri = CommonUtils.TryGetUri(src);
-            if (uri == null || uri.Scheme == "file")
+            var uri = CommonUtils.ResolveAgainstDocumentBase(htmlContainer, src);
+            if (uri == null)
             {
-                return LoadStylesheetFromFile(htmlContainer, uri != null ? uri.AbsolutePath : src);
+                htmlContainer.ReportError(HtmlRenderErrorType.CssParsing, "Failed load stylesheet, invalid source: " + src);
+                return string.Empty;
             }
-            else
-            {
-                return LoadStylesheetFromUri(htmlContainer, uri);
-            }
-        }
 
-        /// <summary>
-        /// Load the stylesheet from local file by given path.
-        /// </summary>
-        /// <param name="htmlContainer">the container of the html to handle load stylesheet for</param>
-        /// <param name="path">the stylesheet file to load</param>
-        /// <returns>the loaded stylesheet string</returns>
-        private static string LoadStylesheetFromFile(HtmlContainerInt htmlContainer, string path)
-        {
-            var fileInfo = CommonUtils.TryGetFileInfo(path);
-            if (fileInfo != null)
-            {
-                if (fileInfo.Exists)
-                {
-                    using (var sr = new StreamReader(fileInfo.FullName))
-                    {
-                        return sr.ReadToEnd();
-                    }
-                }
-                else
-                {
-                    htmlContainer.ReportError(HtmlRenderErrorType.CssParsing, "No stylesheet found by path: " + path);
-                }
-            }
-            else
-            {
-                htmlContainer.ReportError(HtmlRenderErrorType.CssParsing, "Failed load image, invalid source: " + path);
-            }
-            return string.Empty;
-        }
+            var networkResponse = await htmlContainer.Adapter.GetResourceStream(uri).ConfigureAwait(false);
 
-        /// <summary>
-        /// Load the stylesheet from uri by downloading the string.
-        /// </summary>
-        /// <param name="htmlContainer">the container of the html to handle load stylesheet for</param>
-        /// <param name="uri">the uri to download from</param>
-        /// <returns>the loaded stylesheet string</returns>
-        private static string LoadStylesheetFromUri(HtmlContainerInt htmlContainer, Uri uri)
-        {
-            using (var client = new WebClient())
+            if (networkResponse == null || networkResponse.ResourceStream == null)
             {
-                var stylesheet = client.DownloadString(uri);
-                try
-                {
-                    stylesheet = CorrectRelativeUrls(stylesheet, uri);
-                }
-                catch (Exception ex)
-                {
-                    htmlContainer.ReportError(HtmlRenderErrorType.CssParsing, "Error in correcting relative URL in loaded stylesheet", ex);
-                }
-                return stylesheet;
+                htmlContainer.ReportError(HtmlRenderErrorType.CssParsing, "No stylesheet found by path: " + src);
+                return string.Empty;
             }
+
+            // A response served with a Content-Type other than text/css (e.g. a 404 HTML error page
+            // returned with a 200 status by a misconfigured server) is treated as "not a stylesheet" -
+            // return empty and keep rendering, same fail-soft behavior as a missing resource. A response
+            // with no Content-Type header at all (a local file with an unrecognized extension, etc.) is
+            // still accepted, matching this handler's pre-existing behavior of trusting the source.
+            if (networkResponse.ResponseHeaders != null &&
+                networkResponse.ResponseHeaders.TryGetValue("Content-Type", out var contentTypeValues) &&
+                contentTypeValues.Length > 0 &&
+                !contentTypeValues.Any(ct => ct.IndexOf("text/css", StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                using (networkResponse.ResourceStream) { }
+                return string.Empty;
+            }
+
+            string stylesheet;
+            using (var sr = new StreamReader(networkResponse.ResourceStream))
+            {
+                stylesheet = await sr.ReadToEndAsync().ConfigureAwait(false);
+            }
+
+            try
+            {
+                stylesheet = CorrectRelativeUrls(stylesheet, uri.Uri);
+            }
+            catch (Exception ex)
+            {
+                htmlContainer.ReportError(HtmlRenderErrorType.CssParsing, "Error in correcting relative URL in loaded stylesheet", ex);
+            }
+
+            return stylesheet;
         }
 
         /// <summary>

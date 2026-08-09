@@ -11,13 +11,13 @@
 // "The Art of War"
 
 using System;
-using System.Net;
-using System.Text;
-using System.Threading;
+using System.IO;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Handlers;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 using TheArtOfDev.HtmlRenderer.Core.Utils;
 
 namespace TheArtOfDev.HtmlRenderer.Core.Dom
@@ -138,134 +138,159 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         #region Private methods
 
         /// <summary>
-        /// Load YouTube video data (title, image, link) by calling YouTube API.
+        /// Load YouTube video data (title, image, link) by calling YouTube API through the configured
+        /// <see cref="RAdapter.NetworkLoader"/> - the same funnel used for images/stylesheets/fonts, so a
+        /// consumer's custom loader (auth headers, proxy, timeouts) applies here too, not just a raw
+        /// process-wide <c>WebClient</c> bypassing it.
         /// </summary>
         private void LoadYoutubeDataAsync(Uri uri)
         {
-            ThreadPool.QueueUserWorkItem(state =>
-            {
-                try
-                {
-                    var apiUri = new Uri(string.Format("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={0}&format=json", uri.Segments[2]));
+            var apiUri = new RUri(string.Format("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={0}&format=json", uri.Segments[2]));
+            _ = FetchVideoApiDataAsync(apiUri, "YouTube", OnDownloadYoutubeApiCompleted);
+        }
 
-                    var client = new WebClient();
-                    client.Encoding = Encoding.UTF8;
-                    client.DownloadStringCompleted += OnDownloadYoutubeApiCompleted;
-                    client.DownloadStringAsync(apiUri);
-                }
-                catch (Exception ex)
+        /// <summary>
+        /// Load Vimeo video data (title, image, link) by calling Vimeo API through the configured
+        /// <see cref="RAdapter.NetworkLoader"/>.
+        /// </summary>
+        private void LoadVimeoDataAsync(Uri uri)
+        {
+            var apiUri = new RUri(string.Format("https://vimeo.com/api/v2/video/{0}.json", uri.Segments[2]));
+            _ = FetchVideoApiDataAsync(apiUri, "Vimeo", OnDownloadVimeoApiCompleted);
+        }
+
+        /// <summary>
+        /// Fetch and read <paramref name="apiUri"/> as text, fire-and-forget (matching
+        /// <see cref="ImageLoadHandler"/>'s pattern - nothing here blocks layout/paint), and hand the
+        /// result (or null on failure) to <paramref name="parseResult"/>. A null/unresolvable response is
+        /// reported the same way as any other "video not found" outcome - <see cref="RNetworkResponse"/>
+        /// has no HTTP status code to distinguish a 404 from another failure, matching every other
+        /// resource kind's fail-soft contract through this funnel.
+        /// </summary>
+        private async Task FetchVideoApiDataAsync(RUri apiUri, string source, Action<string> parseResult)
+        {
+            try
+            {
+                var networkResponse = await HtmlContainer.Adapter.GetResourceStream(apiUri).ConfigureAwait(false);
+
+                if (networkResponse == null || networkResponse.ResourceStream == null)
                 {
-                    HtmlContainer.ReportError(HtmlRenderErrorType.Iframe, "Failed to get youtube video data: " + uri, ex);
-                    HtmlContainer.RequestRefresh(false);
+                    _videoTitle = "The video is not found, possibly removed by the user.";
                 }
-            });
+                else
+                {
+                    string result;
+                    using (var reader = new StreamReader(networkResponse.ResourceStream))
+                    {
+                        result = await reader.ReadToEndAsync().ConfigureAwait(false);
+                    }
+
+                    parseResult(result);
+                }
+            }
+            catch (Exception ex)
+            {
+                HtmlContainer.ReportError(HtmlRenderErrorType.Iframe, "Failed to get " + source + " video data: " + apiUri.AbsoluteUri, ex);
+            }
+
+            HandlePostApiCall();
         }
 
         /// <summary>
         /// Parse YouTube API response to get video data (title, image, link).
         /// </summary>
-        private void OnDownloadYoutubeApiCompleted(object sender, DownloadStringCompletedEventArgs e)
+        private void OnDownloadYoutubeApiCompleted(string result)
         {
             try
             {
-                if (!e.Cancelled)
+                var idx = result.IndexOf("\"title\"", StringComparison.Ordinal);
+                if (idx > -1)
                 {
-                    if (e.Error == null)
+                    idx = result.IndexOf('"', idx + 7);
+                    if (idx > -1)
                     {
-                        var idx = e.Result.IndexOf("\"title\"", StringComparison.Ordinal);
-                        if (idx > -1)
+                        var endIdx = result.IndexOf('"', idx + 1);
+                        while (endIdx > 0 && result[endIdx - 1] == '\\')
+                            endIdx = result.IndexOf('"', endIdx + 1);
+                        if (endIdx > -1)
                         {
-                            idx = e.Result.IndexOf('"', idx + 7);
-                            if (idx > -1)
-                            {
-                                var endIdx = e.Result.IndexOf('"', idx + 1);
-                                while (endIdx > 0 && e.Result[endIdx - 1] == '\\')
-                                    endIdx = e.Result.IndexOf('"', endIdx + 1);
-                                if (endIdx > -1)
-                                {
-                                    _videoTitle = e.Result.Substring(idx + 1, endIdx - idx - 1).Replace("\\\"", "\"");
-                                }
-                            }
+                            _videoTitle = result.Substring(idx + 1, endIdx - idx - 1).Replace("\\\"", "\"");
                         }
+                    }
+                }
 
-                        idx = e.Result.IndexOf("\"thumbnail_url\"", StringComparison.Ordinal);
-                        if (idx > -1)
+                idx = result.IndexOf("\"thumbnail_url\"", StringComparison.Ordinal);
+                if (idx > -1)
+                {
+                    idx = result.IndexOf('"', idx + 15);
+                    if (idx > -1)
+                    {
+                        var endIdx = result.IndexOf('"', idx + 1);
+                        while (endIdx > 0 && result[endIdx - 1] == '\\')
+                            endIdx = result.IndexOf('"', endIdx + 1);
+                        if (endIdx > -1)
                         {
-                            idx = e.Result.IndexOf('"', idx + 15);
-                            if (idx > -1)
-                            {
-                                var endIdx = e.Result.IndexOf('"', idx + 1);
-                                while (endIdx > 0 && e.Result[endIdx - 1] == '\\')
-                                    endIdx = e.Result.IndexOf('"', endIdx + 1);
-                                if (endIdx > -1)
-                                {
-                                    _videoImageUrl = e.Result.Substring(idx + 1, endIdx - idx - 1).Replace("\\\"", "\"");
-                                }
-                            }
-
-                            idx = e.Result.IndexOf("\"thumbnail_width\"", StringComparison.Ordinal);
-                            if (idx > -1)
-                            {
-                                idx = e.Result.IndexOf(':', idx);
-                                if (idx > -1)
-                                {
-                                    var endIdx = e.Result.IndexOf(',', idx);
-                                    if (endIdx > -1)
-                                    {
-                                        var widthStr = e.Result.Substring(idx + 1, endIdx - idx - 1).Trim();
-                                        if (int.TryParse(widthStr, out int width))
-                                        {
-                                            if (string.IsNullOrEmpty(Width))
-                                                Width = width + "px";
-                                        }
-                                    }
-                                }
-                            }
-
-                            idx = e.Result.IndexOf("\"thumbnail_height\"", StringComparison.Ordinal);
-                            if (idx > -1)
-                            {
-                                idx = e.Result.IndexOf(':', idx);
-                                if (idx > -1)
-                                {
-                                    var endIdx = e.Result.IndexOf(',', idx);
-                                    if (endIdx == -1)
-                                        endIdx = e.Result.IndexOf('}', idx);
-                                    if (endIdx > -1)
-                                    {
-                                        var heightStr = e.Result.Substring(idx + 1, endIdx - idx - 1).Trim();
-                                        if (int.TryParse(heightStr, out int height))
-                                        {
-                                            if (string.IsNullOrEmpty(Height))
-                                                Height = height + "px";
-                                        }
-                                    }
-                                }
-                            }
+                            _videoImageUrl = result.Substring(idx + 1, endIdx - idx - 1).Replace("\\\"", "\"");
                         }
+                    }
 
-                        idx = e.Result.IndexOf("\"html\"", StringComparison.Ordinal);
+                    idx = result.IndexOf("\"thumbnail_width\"", StringComparison.Ordinal);
+                    if (idx > -1)
+                    {
+                        idx = result.IndexOf(':', idx);
                         if (idx > -1)
                         {
-                            idx = e.Result.IndexOf("src=", idx);
-                            if (idx > -1)
+                            var endIdx = result.IndexOf(',', idx);
+                            if (endIdx > -1)
                             {
-                                idx = e.Result.IndexOf("embed/", idx);
-                                if (idx > -1)
+                                var widthStr = result.Substring(idx + 1, endIdx - idx - 1).Trim();
+                                if (int.TryParse(widthStr, out int width))
                                 {
-                                    var endIdx = e.Result.IndexOf('?', idx);
-                                    if (endIdx > -1)
-                                    {
-                                        var videoId = e.Result.Substring(idx + 6, endIdx - idx - 6);
-                                        _videoLinkUrl = "https://www.youtube.com/watch?v=" + videoId;
-                                    }
+                                    if (string.IsNullOrEmpty(Width))
+                                        Width = width + "px";
                                 }
                             }
                         }
                     }
-                    else
+
+                    idx = result.IndexOf("\"thumbnail_height\"", StringComparison.Ordinal);
+                    if (idx > -1)
                     {
-                        HandleDataLoadFailure(e.Error, "YouTube");
+                        idx = result.IndexOf(':', idx);
+                        if (idx > -1)
+                        {
+                            var endIdx = result.IndexOf(',', idx);
+                            if (endIdx == -1)
+                                endIdx = result.IndexOf('}', idx);
+                            if (endIdx > -1)
+                            {
+                                var heightStr = result.Substring(idx + 1, endIdx - idx - 1).Trim();
+                                if (int.TryParse(heightStr, out int height))
+                                {
+                                    if (string.IsNullOrEmpty(Height))
+                                        Height = height + "px";
+                                }
+                            }
+                        }
+                    }
+                }
+
+                idx = result.IndexOf("\"html\"", StringComparison.Ordinal);
+                if (idx > -1)
+                {
+                    idx = result.IndexOf("src=", idx);
+                    if (idx > -1)
+                    {
+                        idx = result.IndexOf("embed/", idx);
+                        if (idx > -1)
+                        {
+                            var endIdx = result.IndexOf('?', idx);
+                            if (endIdx > -1)
+                            {
+                                var videoId = result.Substring(idx + 6, endIdx - idx - 6);
+                                _videoLinkUrl = "https://www.youtube.com/watch?v=" + videoId;
+                            }
+                        }
                     }
                 }
             }
@@ -273,130 +298,92 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             {
                 HtmlContainer.ReportError(HtmlRenderErrorType.Iframe, "Failed to parse YouTube video response", ex);
             }
-
-            HandlePostApiCall(sender);
-        }
-
-        /// <summary>
-        /// Load Vimeo video data (title, image, link) by calling Vimeo API.
-        /// </summary>
-        private void LoadVimeoDataAsync(Uri uri)
-        {
-            ThreadPool.QueueUserWorkItem(state =>
-            {
-                try
-                {
-                    var apiUri = new Uri(string.Format("https://vimeo.com/api/v2/video/{0}.json", uri.Segments[2]));
-
-                    var client = new WebClient();
-                    client.Encoding = Encoding.UTF8;
-                    client.DownloadStringCompleted += OnDownloadVimeoApiCompleted;
-                    client.DownloadStringAsync(apiUri);
-                }
-                catch (Exception ex)
-                {
-                    _imageLoadingComplete = true;
-                    SetErrorBorder();
-                    HtmlContainer.ReportError(HtmlRenderErrorType.Iframe, "Failed to get vimeo video data: " + uri, ex);
-                    HtmlContainer.RequestRefresh(false);
-                }
-            });
         }
 
         /// <summary>
         /// Parse Vimeo API response to get video data (title, image, link).
         /// </summary>
-        private void OnDownloadVimeoApiCompleted(object sender, DownloadStringCompletedEventArgs e)
+        private void OnDownloadVimeoApiCompleted(string result)
         {
             try
             {
-                if (!e.Cancelled)
+                var idx = result.IndexOf("\"title\"", StringComparison.Ordinal);
+                if (idx > -1)
                 {
-                    if (e.Error == null)
+                    idx = result.IndexOf('"', idx + 7);
+                    if (idx > -1)
                     {
-                        var idx = e.Result.IndexOf("\"title\"", StringComparison.Ordinal);
-                        if (idx > -1)
+                        var endIdx = result.IndexOf('"', idx + 1);
+                        while (endIdx > 0 && result[endIdx - 1] == '\\')
+                            endIdx = result.IndexOf('"', endIdx + 1);
+                        if (endIdx > -1)
                         {
-                            idx = e.Result.IndexOf('"', idx + 7);
-                            if (idx > -1)
-                            {
-                                var endIdx = e.Result.IndexOf('"', idx + 1);
-                                while (endIdx > 0 && e.Result[endIdx - 1] == '\\')
-                                    endIdx = e.Result.IndexOf('"', endIdx + 1);
-                                if (endIdx > -1)
-                                {
-                                    _videoTitle = e.Result.Substring(idx + 1, endIdx - idx - 1).Replace("\\\"", "\"");
-                                }
-                            }
+                            _videoTitle = result.Substring(idx + 1, endIdx - idx - 1).Replace("\\\"", "\"");
                         }
+                    }
+                }
 
-                        idx = e.Result.IndexOf("\"thumbnail_large\"", StringComparison.Ordinal);
-                        if (idx > -1)
-                        {
-                            if (string.IsNullOrEmpty(Width))
-                                Width = "640";
-                            if (string.IsNullOrEmpty(Height))
-                                Height = "360";
-                            var urlIdx = e.Result.IndexOf("\"https:\\/\\/", idx);
-                            if (urlIdx != -1)
-                                idx = urlIdx;
-                        }
-                        else
-                        {
-                            idx = e.Result.IndexOf("\"thumbnail_medium\"", StringComparison.Ordinal);
-                            if (idx > -1)
-                            {
-                                if (string.IsNullOrEmpty(Width))
-                                    Width = "200";
-                                if (string.IsNullOrEmpty(Height))
-                                    Height = "150";
-                                var urlIdx = e.Result.IndexOf("\"https:\\/\\/", idx);
-                                if (urlIdx != -1)
-                                    idx = urlIdx;
-                            }
-                            else
-                            {
-                                idx = e.Result.IndexOf("\"thumbnail_small\"", StringComparison.Ordinal);
-                                if (idx > -1)
-                                {
-                                    if (string.IsNullOrEmpty(Width))
-                                        Width = "100";
-                                    if (string.IsNullOrEmpty(Height))
-                                        Height = "75";
-                                    var urlIdx = e.Result.IndexOf("\"https:\\/\\/", idx);
-                                    if (urlIdx != -1)
-                                        idx = urlIdx;
-                                }
-                            }
-                        }
-                        if (idx > -1)
-                        {
-                            idx = idx + 1;
-                            var endIdx = e.Result.IndexOf('"', idx);
-                            if (endIdx > -1)
-                            {
-                                _videoImageUrl = e.Result.Substring(idx, endIdx - idx).Replace("\\/", "/");
-                            }
-                        }
-
-                        idx = e.Result.IndexOf("\"url\"", StringComparison.Ordinal);
-                        if (idx > -1)
-                        {
-                            idx = e.Result.IndexOf("\"https:\\/\\/", idx);
-                            if (idx > -1)
-                            {
-                                idx = idx + 1;
-                                var endIdx = e.Result.IndexOf('"', idx);
-                                if (endIdx > -1)
-                                {
-                                    _videoLinkUrl = e.Result.Substring(idx, endIdx - idx).Replace("\\/", "/");
-                                }
-                            }
-                        }
+                idx = result.IndexOf("\"thumbnail_large\"", StringComparison.Ordinal);
+                if (idx > -1)
+                {
+                    if (string.IsNullOrEmpty(Width))
+                        Width = "640";
+                    if (string.IsNullOrEmpty(Height))
+                        Height = "360";
+                    var urlIdx = result.IndexOf("\"https:\\/\\/", idx);
+                    if (urlIdx != -1)
+                        idx = urlIdx;
+                }
+                else
+                {
+                    idx = result.IndexOf("\"thumbnail_medium\"", StringComparison.Ordinal);
+                    if (idx > -1)
+                    {
+                        if (string.IsNullOrEmpty(Width))
+                            Width = "200";
+                        if (string.IsNullOrEmpty(Height))
+                            Height = "150";
+                        var urlIdx = result.IndexOf("\"https:\\/\\/", idx);
+                        if (urlIdx != -1)
+                            idx = urlIdx;
                     }
                     else
                     {
-                        HandleDataLoadFailure(e.Error, "Vimeo");
+                        idx = result.IndexOf("\"thumbnail_small\"", StringComparison.Ordinal);
+                        if (idx > -1)
+                        {
+                            if (string.IsNullOrEmpty(Width))
+                                Width = "100";
+                            if (string.IsNullOrEmpty(Height))
+                                Height = "75";
+                            var urlIdx = result.IndexOf("\"https:\\/\\/", idx);
+                            if (urlIdx != -1)
+                                idx = urlIdx;
+                        }
+                    }
+                }
+                if (idx > -1)
+                {
+                    idx = idx + 1;
+                    var endIdx = result.IndexOf('"', idx);
+                    if (endIdx > -1)
+                    {
+                        _videoImageUrl = result.Substring(idx, endIdx - idx).Replace("\\/", "/");
+                    }
+                }
+
+                idx = result.IndexOf("\"url\"", StringComparison.Ordinal);
+                if (idx > -1)
+                {
+                    idx = result.IndexOf("\"https:\\/\\/", idx);
+                    if (idx > -1)
+                    {
+                        idx = idx + 1;
+                        var endIdx = result.IndexOf('"', idx);
+                        if (endIdx > -1)
+                        {
+                            _videoLinkUrl = result.Substring(idx, endIdx - idx).Replace("\\/", "/");
+                        }
                     }
                 }
             }
@@ -404,51 +391,21 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             {
                 HtmlContainer.ReportError(HtmlRenderErrorType.Iframe, "Failed to parse Vimeo video response", ex);
             }
-
-            HandlePostApiCall(sender);
         }
 
         /// <summary>
-        /// Handle error occurred during video data load to handle if the video was not found.
+        /// Update error-border state once the video API call has finished (success, failure, or parse
+        /// error) and request a refresh.
         /// </summary>
-        /// <param name="ex">the exception that occurred during data load web request</param>
-        /// <param name="source">the name of the video source (YouTube/Vimeo/Etc.)</param>
-        private void HandleDataLoadFailure(Exception ex, string source)
+        private void HandlePostApiCall()
         {
-            var webError = ex as WebException;
-            var webResponse = webError != null ? webError.Response as HttpWebResponse : null;
-            if (webResponse != null && webResponse.StatusCode == HttpStatusCode.NotFound)
+            if (_videoImageUrl == null)
             {
-                _videoTitle = "The video is not found, possibly removed by the user.";
+                _imageLoadingComplete = true;
+                SetErrorBorder();
             }
-            else
-            {
-                HtmlContainer.ReportError(HtmlRenderErrorType.Iframe, "Failed to load " + source + " video data", ex);
-            }
-        }
 
-        /// <summary>
-        /// Create image handler for downloading video image if found and release the WebClient instance used for API call.
-        /// </summary>
-        private void HandlePostApiCall(object sender)
-        {
-            try
-            {
-                if (_videoImageUrl == null)
-                {
-                    _imageLoadingComplete = true;
-                    SetErrorBorder();
-                }
-
-                var webClient = (WebClient)sender;
-                webClient.DownloadStringCompleted -= OnDownloadYoutubeApiCompleted;
-                webClient.DownloadStringCompleted -= OnDownloadVimeoApiCompleted;
-                webClient.Dispose();
-
-                HtmlContainer.RequestRefresh(IsLayoutRequired());
-            }
-            catch
-            { }
+            HtmlContainer.RequestRefresh(IsLayoutRequired());
         }
 
         /// <summary>

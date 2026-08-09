@@ -16,6 +16,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Reflection;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using TheArtOfDev.HtmlRenderer.Core;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
@@ -71,31 +72,31 @@ namespace TheArtOfDev.HtmlRenderer.Demo.WinForms
             }
         }
 
-        private void OnUseGdiPlus_Click(object sender, EventArgs e)
+        private async void OnUseGdiPlus_Click(object sender, EventArgs e)
         {
             _useGdiPlusTSB.Checked = !_useGdiPlusTSB.Checked;
             _textRenderingHintTSCB.Visible = _useGdiPlusTSB.Checked;
             _backgroundColorTSB.Visible = !_useGdiPlusTSB.Checked;
             _toolStripLabel.Text = _useGdiPlusTSB.Checked ? "Text Rendering Hint:" : "Background:";
-            GenerateImage();
+            await GenerateImage();
         }
 
-        private void OnBackgroundColor_SelectedIndexChanged(object sender, EventArgs e)
+        private async void OnBackgroundColor_SelectedIndexChanged(object sender, EventArgs e)
         {
-            GenerateImage();
+            await GenerateImage();
         }
 
-        private void _textRenderingHintTSCB_SelectedIndexChanged(object sender, EventArgs e)
+        private async void _textRenderingHintTSCB_SelectedIndexChanged(object sender, EventArgs e)
         {
-            GenerateImage();
+            await GenerateImage();
         }
 
-        private void OnGenerateImage_Click(object sender, EventArgs e)
+        private async void OnGenerateImage_Click(object sender, EventArgs e)
         {
-            GenerateImage();
+            await GenerateImage();
         }
 
-        private void GenerateImage()
+        private async Task GenerateImage()
         {
             if (_backgroundColorTSB.SelectedItem != null && _textRenderingHintTSCB.SelectedItem != null)
             {
@@ -105,17 +106,11 @@ namespace TheArtOfDev.HtmlRenderer.Demo.WinForms
                 Image img;
                 if (_useGdiPlusTSB.Checked)
                 {
-                    img = HtmlRender.RenderToImageGdiPlus(_html, _pictureBox.ClientSize, textRenderingHint, null, DemoUtils.OnStylesheetLoad, HtmlRenderingHelper.OnImageLoad);
+                    img = await HtmlRender.RenderToImageGdiPlusAsync(_html, _pictureBox.ClientSize, textRenderingHint, null, DemoUtils.OnStylesheetLoad, HtmlRenderingHelper.OnImageLoad);
                 }
                 else
                 {
-                    EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = DemoUtils.OnStylesheetLoad;
-                    EventHandler<HtmlImageLoadEventArgs> imageLoad = HtmlRenderingHelper.OnImageLoad;
-                    var objects = new object[] { _html, _pictureBox.ClientSize, backgroundColor, null, stylesheetLoad, imageLoad };
-
-                    var types = new[] { typeof(String), typeof(Size), typeof(Color), typeof(CssData), typeof(EventHandler<HtmlStylesheetLoadEventArgs>), typeof(EventHandler<HtmlImageLoadEventArgs>) };
-                    var m = typeof(HtmlRender).GetMethod("RenderToImage", BindingFlags.InvokeMethod | BindingFlags.Static | BindingFlags.Public, null, types, null);
-                    img = (Image)m.Invoke(null, objects);
+                    img = await HtmlRender.RenderToImageAsync(_html, _pictureBox.ClientSize, backgroundColor, null, DemoUtils.OnStylesheetLoad, HtmlRenderingHelper.OnImageLoad);
                 }
                 _pictureBox.Image = img;
             }

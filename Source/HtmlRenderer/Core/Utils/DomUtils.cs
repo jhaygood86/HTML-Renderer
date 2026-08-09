@@ -541,6 +541,32 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
         }
 
         /// <summary>
+        /// Get the first css box under the given sub-tree with the given html tag name (e.g. "base").
+        /// </summary>
+        /// <param name="box">the box to start search from</param>
+        /// <param name="tagName">the tag name to find the box by (case-insensitive)</param>
+        /// <returns>css box if exists or null</returns>
+        public static CssBox GetBoxByTagName(CssBox box, string tagName)
+        {
+            if (box != null && !string.IsNullOrEmpty(tagName))
+            {
+                if (box.HtmlTag != null && tagName.Equals(box.HtmlTag.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return box;
+                }
+
+                foreach (var childBox in box.Boxes)
+                {
+                    var foundBox = GetBoxByTagName(childBox, tagName);
+                    if (foundBox != null)
+                        return foundBox;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Get css line box under the given sub-tree at the given y location or the nearest line from the top.<br/>
         /// the location must be in correct scroll offset.
         /// </summary>

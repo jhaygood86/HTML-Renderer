@@ -6,7 +6,7 @@
 // like the days and months;
 // they die and are reborn,
 // like the four seasons."
-// 
+//
 // - Sun Tsu,
 // "The Art of War"
 
@@ -15,6 +15,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Core;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Utils;
@@ -31,8 +32,8 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
     /// <remarks>
     /// <para>
     /// <b>GDI vs. GDI+ text rendering</b><br/>
-    /// Windows supports two text rendering technologies: GDI and GDI+.<br/> 
-    /// GDI is older, has better performance and looks better on standard monitors but doesn't support alpha channel for transparency.<br/> 
+    /// Windows supports two text rendering technologies: GDI and GDI+.<br/>
+    /// GDI is older, has better performance and looks better on standard monitors but doesn't support alpha channel for transparency.<br/>
     /// GDI+ is newer, device independent so work better for printers but is slower and looks worse on monitors.<br/>
     /// HtmlRender supports both GDI and GDI+ text rendering to accommodate different needs, GDI+ text rendering methods have "GdiPlus" suffix
     /// in their name where GDI do not.<br/>
@@ -42,12 +43,12 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
     /// See https://codeplexarchive.org/ProjectTab/Wiki/HtmlRenderer/Documentation/Image%20generation <br/>
     /// Because of GDI text rendering issue with alpha channel clear type text rendering rendering to image requires special handling.<br/>
     /// <u>Solid color background -</u> generate an image where the background is filled with solid color and all the html is rendered on top
-    /// of the background color, GDI text rendering will be used. (RenderToImage method where the first argument is html string)<br/>
-    /// <u>Image background -</u> render html on top of existing image with whatever currently exist but it cannot have transparent pixels, 
-    /// GDI text rendering will be used. (RenderToImage method where the first argument is Image object)<br/>
+    /// of the background color, GDI text rendering will be used. (RenderToImageAsync method where the first argument is html string)<br/>
+    /// <u>Image background -</u> render html on top of existing image with whatever currently exist but it cannot have transparent pixels,
+    /// GDI text rendering will be used. (RenderToImageAsync method where the first argument is Image object)<br/>
     /// <u>Transparent background -</u> render html to empty image using GDI+ text rendering, the generated image can be transparent.
     /// Text rendering can be controlled using <see cref="TextRenderingHint"/>, note that <see cref="TextRenderingHint.ClearTypeGridFit"/>
-    /// doesn't render well on transparent background. (RenderToImageGdiPlus method)<br/>
+    /// doesn't render well on transparent background. (RenderToImageGdiPlusAsync method)<br/>
     /// </para>
     /// <para>
     /// <b>Overwrite stylesheet resolution</b><br/>
@@ -64,7 +65,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
     /// Allows to overwrite the loaded image by providing the image object manually, or different source (file or URL) to load from.<br/>
     /// Example: image 'src' can be non-valid string that is interpreted in the overwrite delegate by custom logic to resource image object<br/>
     /// Example: image 'src' in the html is relative - the overwrite intercepts the load and provide full source URL to load the image from<br/>
-    /// Example: image download requires authentication - the overwrite intercepts the load, downloads the image to disk using custom code and provide 
+    /// Example: image download requires authentication - the overwrite intercepts the load, downloads the image to disk using custom code and provide
     /// file path to load the image from.<br/>
     /// If no alternative data is provided the original source will be used.<br/>
     /// Note: Cannot use asynchronous scheme overwrite scheme.<br/>
@@ -73,14 +74,14 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
     /// <example>
     /// <para>
     /// <b>Simple rendering</b><br/>
-    /// HtmlRender.Render(g, "<![CDATA[<div>Hello <b>World</b></div>]]>");<br/>
-    /// HtmlRender.Render(g, "<![CDATA[<div>Hello <b>World</b></div>]]>", 10, 10, 500, CssData.Parse("body {font-size: 20px}")");<br/>
+    /// await HtmlRender.RenderAsync(g, "<![CDATA[<div>Hello <b>World</b></div>]]>");<br/>
+    /// await HtmlRender.RenderAsync(g, "<![CDATA[<div>Hello <b>World</b></div>]]>", 10, 10, 500, CssData.Parse("body {font-size: 20px}")");<br/>
     /// </para>
     /// <para>
     /// <b>Image rendering</b><br/>
-    /// HtmlRender.RenderToImage("<![CDATA[<div>Hello <b>World</b></div>]]>", new Size(600,400));<br/>
-    /// HtmlRender.RenderToImage("<![CDATA[<div>Hello <b>World</b></div>]]>", 600);<br/>
-    /// HtmlRender.RenderToImage(existingImage, "<![CDATA[<div>Hello <b>World</b></div>]]>");<br/>
+    /// await HtmlRender.RenderToImageAsync("<![CDATA[<div>Hello <b>World</b></div>]]>", new Size(600,400));<br/>
+    /// await HtmlRender.RenderToImageAsync("<![CDATA[<div>Hello <b>World</b></div>]]>", 600);<br/>
+    /// await HtmlRender.RenderToImageAsync(existingImage, "<![CDATA[<div>Hello <b>World</b></div>]]>");<br/>
     /// </para>
     /// </example>
     public static class HtmlRender
@@ -104,7 +105,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
 
         /// <summary>
         /// Adds a font mapping from <paramref name="fromFamily"/> to <paramref name="toFamily"/> iff the <paramref name="fromFamily"/> is not found.<br/>
-        /// When the <paramref name="fromFamily"/> font is used in rendered html and is not found in existing 
+        /// When the <paramref name="fromFamily"/> font is used in rendered html and is not found in existing
         /// fonts (installed or added) it will be replaced by <paramref name="toFamily"/>.<br/>
         /// </summary>
         /// <remarks>
@@ -122,7 +123,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
 
         /// <summary>
         /// Parse the given stylesheet to <see cref="CssData"/> object.<br/>
-        /// If <paramref name="combineWithDefault"/> is true the parsed css blocks are added to the 
+        /// If <paramref name="combineWithDefault"/> is true the parsed css blocks are added to the
         /// default css data (as defined by W3), merged if class name already exists. If false only the data in the given stylesheet is returned.
         /// </summary>
         /// <seealso cref="http://www.w3.org/TR/CSS21/sample.html"/>
@@ -147,7 +148,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the size required for the html</returns>
-        public static SizeF Measure(Graphics g, string html, float maxWidth = 0, CssData cssData = null,
+        public static Task<SizeF> MeasureAsync(Graphics g, string html, float maxWidth = 0, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(g, "g");
@@ -167,7 +168,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the size required for the html</returns>
-        public static SizeF MeasureGdiPlus(Graphics g, string html, float maxWidth = 0, CssData cssData = null,
+        public static Task<SizeF> MeasureGdiPlusAsync(Graphics g, string html, float maxWidth = 0, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(g, "g");
@@ -177,7 +178,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <summary>
         /// Renders the specified HTML source on the specified location and max width restriction.<br/>
         /// Use GDI text rendering, note <see cref="Graphics.TextRenderingHint"/> has no effect.<br/>
-        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// Returned is the actual width and height of the rendered html.<br/>
         /// </summary>
@@ -190,7 +191,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the actual size of the rendered html</returns>
-        public static SizeF Render(Graphics g, string html, float left = 0, float top = 0, float maxWidth = 0, CssData cssData = null,
+        public static Task<SizeF> RenderAsync(Graphics g, string html, float left = 0, float top = 0, float maxWidth = 0, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(g, "g");
@@ -200,7 +201,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <summary>
         /// Renders the specified HTML source on the specified location and max size restriction.<br/>
         /// Use GDI text rendering, note <see cref="Graphics.TextRenderingHint"/> has no effect.<br/>
-        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxSize"/>.Height is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -214,7 +215,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the actual size of the rendered html</returns>
-        public static SizeF Render(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData = null,
+        public static Task<SizeF> RenderAsync(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(g, "g");
@@ -224,7 +225,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <summary>
         /// Renders the specified HTML source on the specified location and max size restriction.<br/>
         /// Use GDI+ text rending, use <see cref="Graphics.TextRenderingHint"/> to control text rendering.<br/>
-        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// Returned is the actual width and height of the rendered html.<br/>
         /// </summary>
@@ -237,7 +238,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the actual size of the rendered html</returns>
-        public static SizeF RenderGdiPlus(Graphics g, string html, float left = 0, float top = 0, float maxWidth = 0, CssData cssData = null,
+        public static Task<SizeF> RenderGdiPlusAsync(Graphics g, string html, float left = 0, float top = 0, float maxWidth = 0, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(g, "g");
@@ -247,7 +248,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <summary>
         /// Renders the specified HTML source on the specified location and max size restriction.<br/>
         /// Use GDI+ text rending, use <see cref="Graphics.TextRenderingHint"/> to control text rendering.<br/>
-        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxSize"/>.Height is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -261,14 +262,14 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the actual size of the rendered html</returns>
-        public static SizeF RenderGdiPlus(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData = null,
+        public static Task<SizeF> RenderGdiPlusAsync(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(g, "g");
             return RenderClip(g, html, location, maxSize, cssData, true, stylesheetLoad, imageLoad);
         }
 
-        public static Metafile RenderToMetafile(string html, float left = 0, float top = 0, float maxWidth = 0, CssData cssData = null,
+        public static async Task<Metafile> RenderToMetafileAsync(string html, float left = 0, float top = 0, float maxWidth = 0, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             Metafile image;
@@ -280,7 +281,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
 
                 using (var g = Graphics.FromImage(image))
                 {
-                    Render(g, html, left, top, maxWidth, cssData, stylesheetLoad, imageLoad);
+                    await RenderAsync(g, html, left, top, maxWidth, cssData, stylesheetLoad, imageLoad).ConfigureAwait(false);
                 }
             }
             finally
@@ -303,12 +304,12 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="cssData">optional: the style to use for html rendering (default - use W3 default style)</param>
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
-        public static void RenderToImage(Image image, string html, PointF location = new PointF(), CssData cssData = null,
+        public static Task RenderToImageAsync(Image image, string html, PointF location = new PointF(), CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(image, "image");
             var maxSize = new SizeF(image.Size.Width - location.X, image.Size.Height - location.Y);
-            RenderToImage(image, html, location, maxSize, cssData, stylesheetLoad, imageLoad);
+            return RenderToImageAsync(image, html, location, maxSize, cssData, stylesheetLoad, imageLoad);
         }
 
         /// <summary>
@@ -324,7 +325,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="cssData">optional: the style to use for html rendering (default - use W3 default style)</param>
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
-        public static void RenderToImage(Image image, string html, PointF location, SizeF maxSize, CssData cssData = null,
+        public static async Task RenderToImageAsync(Image image, string html, PointF location, SizeF maxSize, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             ArgChecker.AssertArgNotNull(image, "image");
@@ -343,7 +344,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                         memoryGraphics.DrawImageUnscaled(image, 0, 0);
 
                         // render HTML into the memory buffer
-                        RenderHtml(memoryGraphics, html, location, maxSize, cssData, false, stylesheetLoad, imageLoad);
+                        await RenderHtml(memoryGraphics, html, location, maxSize, cssData, false, stylesheetLoad, imageLoad).ConfigureAwait(false);
                     }
 
                     // copy from memory buffer to image
@@ -372,7 +373,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the generated image of the html</returns>
         /// <exception cref="ArgumentOutOfRangeException">if <paramref name="backgroundColor"/> is <see cref="Color.Transparent"/></exception>.
-        public static Image RenderToImage(string html, Size size, Color backgroundColor = new Color(), CssData cssData = null,
+        public static async Task<Image> RenderToImageAsync(string html, Size size, Color backgroundColor = new Color(), CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             if (backgroundColor == Color.Transparent)
@@ -394,7 +395,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                         memoryGraphics.Clear(backgroundColor != Color.Empty ? backgroundColor : Color.White);
 
                         // render HTML into the memory buffer
-                        RenderHtml(memoryGraphics, html, PointF.Empty, size, cssData, true, stylesheetLoad, imageLoad);
+                        await RenderHtml(memoryGraphics, html, PointF.Empty, size, cssData, true, stylesheetLoad, imageLoad).ConfigureAwait(false);
                     }
 
                     // copy from memory buffer to image
@@ -411,7 +412,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
 
         /// <summary>
         /// Renders the specified HTML into a new image of unknown size that will be determined by max width/height and HTML layout.<br/>
-        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxHeight"/> is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -429,15 +430,15 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the generated image of the html</returns>
         /// <exception cref="ArgumentOutOfRangeException">if <paramref name="backgroundColor"/> is <see cref="Color.Transparent"/></exception>.
-        public static Image RenderToImage(string html, int maxWidth = 0, int maxHeight = 0, Color backgroundColor = new Color(), CssData cssData = null,
+        public static Task<Image> RenderToImageAsync(string html, int maxWidth = 0, int maxHeight = 0, Color backgroundColor = new Color(), CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
-            return RenderToImage(html, Size.Empty, new Size(maxWidth, maxHeight), backgroundColor, cssData, stylesheetLoad, imageLoad);
+            return RenderToImageAsync(html, Size.Empty, new Size(maxWidth, maxHeight), backgroundColor, cssData, stylesheetLoad, imageLoad);
         }
 
         /// <summary>
         /// Renders the specified HTML into a new image of unknown size that will be determined by min/max width/height and HTML layout.<br/>
-        /// If <paramref name="maxSize.Width"/> is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxSize.Width"/> is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxSize.Height"/> is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -456,7 +457,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the generated image of the html</returns>
         /// <exception cref="ArgumentOutOfRangeException">if <paramref name="backgroundColor"/> is <see cref="Color.Transparent"/></exception>.
-        public static Image RenderToImage(string html, Size minSize, Size maxSize, Color backgroundColor = new Color(), CssData cssData = null,
+        public static async Task<Image> RenderToImageAsync(string html, Size minSize, Size maxSize, Color backgroundColor = new Color(), CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             if (backgroundColor == Color.Transparent)
@@ -474,7 +475,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                     container.StylesheetLoad += stylesheetLoad;
                 if (imageLoad != null)
                     container.ImageLoad += imageLoad;
-                container.SetHtml(html, cssData);
+                await container.SetHtml(html, cssData).ConfigureAwait(false);
 
                 var finalSize = MeasureHtmlByRestrictions(container, minSize, maxSize);
                 container.MaxSize = finalSize;
@@ -520,7 +521,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the generated image of the html</returns>
-        public static Image RenderToImageGdiPlus(string html, Size size, TextRenderingHint textRenderingHint = TextRenderingHint.AntiAlias, CssData cssData = null,
+        public static async Task<Image> RenderToImageGdiPlusAsync(string html, Size size, TextRenderingHint textRenderingHint = TextRenderingHint.AntiAlias, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             var image = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb);
@@ -528,7 +529,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
             using (var g = Graphics.FromImage(image))
             {
                 g.TextRenderingHint = textRenderingHint;
-                RenderHtml(g, html, PointF.Empty, size, cssData, true, stylesheetLoad, imageLoad);
+                await RenderHtml(g, html, PointF.Empty, size, cssData, true, stylesheetLoad, imageLoad).ConfigureAwait(false);
             }
 
             return image;
@@ -536,7 +537,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
 
         /// <summary>
         /// Renders the specified HTML into a new image of unknown size that will be determined by max width/height and HTML layout.<br/>
-        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxWidth"/> is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxHeight"/> is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -552,15 +553,15 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the generated image of the html</returns>
-        public static Image RenderToImageGdiPlus(string html, int maxWidth = 0, int maxHeight = 0, TextRenderingHint textRenderingHint = TextRenderingHint.AntiAlias, CssData cssData = null,
+        public static Task<Image> RenderToImageGdiPlusAsync(string html, int maxWidth = 0, int maxHeight = 0, TextRenderingHint textRenderingHint = TextRenderingHint.AntiAlias, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
-            return RenderToImageGdiPlus(html, Size.Empty, new Size(maxWidth, maxHeight), textRenderingHint, cssData, stylesheetLoad, imageLoad);
+            return RenderToImageGdiPlusAsync(html, Size.Empty, new Size(maxWidth, maxHeight), textRenderingHint, cssData, stylesheetLoad, imageLoad);
         }
 
         /// <summary>
         /// Renders the specified HTML into a new image of unknown size that will be determined by min/max width/height and HTML layout.<br/>
-        /// If <paramref name="maxSize.Width"/> is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxSize.Width"/> is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxSize.Height"/> is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -577,7 +578,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the generated image of the html</returns>
-        public static Image RenderToImageGdiPlus(string html, Size minSize, Size maxSize, TextRenderingHint textRenderingHint = TextRenderingHint.AntiAlias, CssData cssData = null,
+        public static async Task<Image> RenderToImageGdiPlusAsync(string html, Size minSize, Size maxSize, TextRenderingHint textRenderingHint = TextRenderingHint.AntiAlias, CssData cssData = null,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad = null, EventHandler<HtmlImageLoadEventArgs> imageLoad = null)
         {
             if (string.IsNullOrEmpty(html))
@@ -593,7 +594,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                     container.StylesheetLoad += stylesheetLoad;
                 if (imageLoad != null)
                     container.ImageLoad += imageLoad;
-                container.SetHtml(html, cssData);
+                await container.SetHtml(html, cssData).ConfigureAwait(false);
 
                 var finalSize = MeasureHtmlByRestrictions(container, minSize, maxSize);
                 container.MaxSize = finalSize;
@@ -626,7 +627,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the size required for the html</returns>
-        private static SizeF Measure(Graphics g, string html, float maxWidth, CssData cssData, bool useGdiPlusTextRendering,
+        private static async Task<SizeF> Measure(Graphics g, string html, float maxWidth, CssData cssData, bool useGdiPlusTextRendering,
             EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad, EventHandler<HtmlImageLoadEventArgs> imageLoad)
         {
             SizeF actualSize = SizeF.Empty;
@@ -644,7 +645,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                     if (imageLoad != null)
                         container.ImageLoad += imageLoad;
 
-                    container.SetHtml(html, cssData);
+                    await container.SetHtml(html, cssData).ConfigureAwait(false);
                     container.PerformLayout(g);
 
                     actualSize = container.ActualSize;
@@ -675,7 +676,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
 
         /// <summary>
         /// Renders the specified HTML source on the specified location and max size restriction.<br/>
-        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxSize"/>.Height is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -691,7 +692,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the actual size of the rendered html</returns>
-        private static SizeF RenderClip(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData, bool useGdiPlusTextRendering, EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad, EventHandler<HtmlImageLoadEventArgs> imageLoad)
+        private static async Task<SizeF> RenderClip(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData, bool useGdiPlusTextRendering, EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad, EventHandler<HtmlImageLoadEventArgs> imageLoad)
         {
             Region prevClip = null;
             if (maxSize.Height > 0)
@@ -700,7 +701,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                 g.SetClip(new RectangleF(location, maxSize));
             }
 
-            var actualSize = RenderHtml(g, html, location, maxSize, cssData, useGdiPlusTextRendering, stylesheetLoad, imageLoad);
+            var actualSize = await RenderHtml(g, html, location, maxSize, cssData, useGdiPlusTextRendering, stylesheetLoad, imageLoad).ConfigureAwait(false);
 
             if (prevClip != null)
             {
@@ -712,7 +713,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
 
         /// <summary>
         /// Renders the specified HTML source on the specified location and max size restriction.<br/>
-        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line 
+        /// If <paramref name="maxSize"/>.Width is zero the html will use all the required width, otherwise it will perform line
         /// wrap as specified in the html<br/>
         /// If <paramref name="maxSize"/>.Height is zero the html will use all the required height, otherwise it will clip at the
         /// given max height not rendering the html below it.<br/>
@@ -727,7 +728,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// <param name="stylesheetLoad">optional: can be used to overwrite stylesheet resolution logic</param>
         /// <param name="imageLoad">optional: can be used to overwrite image resolution logic</param>
         /// <returns>the actual size of the rendered html</returns>
-        private static SizeF RenderHtml(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData, bool useGdiPlusTextRendering, EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad, EventHandler<HtmlImageLoadEventArgs> imageLoad)
+        private static async Task<SizeF> RenderHtml(Graphics g, string html, PointF location, SizeF maxSize, CssData cssData, bool useGdiPlusTextRendering, EventHandler<HtmlStylesheetLoadEventArgs> stylesheetLoad, EventHandler<HtmlImageLoadEventArgs> imageLoad)
         {
             SizeF actualSize = SizeF.Empty;
 
@@ -746,7 +747,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                     if (imageLoad != null)
                         container.ImageLoad += imageLoad;
 
-                    container.SetHtml(html, cssData);
+                    await container.SetHtml(html, cssData).ConfigureAwait(false);
                     container.PerformLayout(g);
                     container.PerformPaint(g);
 

@@ -15,6 +15,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using TheArtOfDev.HtmlRenderer.Core;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
@@ -103,6 +105,14 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// The last position of the scrollbars to know if it has changed to update mouse
         /// </summary>
         protected Point _lastScrollOffset;
+
+        /// <summary>
+        /// Tracks the in-flight <see cref="SetTextAsync"/> call, if any, so a newer call can supersede an
+        /// older one still awaiting <see cref="HtmlContainer.SetHtml"/> - the stale call's post-await side
+        /// effects (layout/invalidate/error reporting) are skipped once it resumes, checked by reference
+        /// equality against this field.
+        /// </summary>
+        private CancellationTokenSource _pendingLoad;
 
         #endregion
 
@@ -312,7 +322,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
             {
                 _baseRawCssData = value;
                 _baseCssData = HtmlRender.ParseStyleSheet(value);
-                _htmlContainer.SetHtml(_text, _baseCssData);
+                _ = SetTextAsync(_text);
             }
         }
 
@@ -342,12 +352,53 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
                 if (!IsDisposed)
                 {
                     VerticalScroll.Value = VerticalScroll.Minimum;
-                    _htmlContainer.SetHtml(_text, _baseCssData);
-                    PerformLayout();
-                    Invalidate();
-                    InvokeMouseMove();
+                    _ = SetTextAsync(_text);
                 }
             }
+        }
+
+        /// <summary>
+        /// Sets the html of this control and awaits the async load - the real entry point behind the
+        /// <see cref="Text"/>/<see cref="BaseStylesheet"/> property setters, for callers that want to
+        /// await completion or cancel an in-flight load.
+        /// </summary>
+        /// <remarks>
+        /// A new call before a previous one finishes supersedes it: the previous call's
+        /// <see cref="HtmlContainer.SetHtml"/> keeps running (it has no mid-flight cancellation point of
+        /// its own) but its post-completion side effects - layout, invalidate, error reporting - are
+        /// discarded once it resumes, so only the newest call's results ever reach the control.
+        /// </remarks>
+        /// <param name="html">the html to set</param>
+        /// <param name="cancellationToken">optional: cancel this specific call without affecting others</param>
+        public async Task SetTextAsync(string html, CancellationToken cancellationToken = default)
+        {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _pendingLoad?.Cancel();
+            _pendingLoad = cts;
+
+            try
+            {
+                await _htmlContainer.SetHtml(html, _baseCssData);
+            }
+            catch (Exception ex)
+            {
+                if (cts == _pendingLoad)
+                {
+                    OnRenderError(this, new HtmlRenderErrorEventArgs(HtmlRenderErrorType.General, "Failed to set html", ex));
+                }
+                return;
+            }
+
+            // Superseded by a newer SetTextAsync/Text/BaseStylesheet call while this one was awaiting -
+            // that call's own results are what the control should reflect, not this stale one's.
+            if (cts != _pendingLoad || cts.IsCancellationRequested || IsDisposed)
+            {
+                return;
+            }
+
+            PerformLayout();
+            Invalidate();
+            InvokeMouseMove();
         }
 
         /// <summary>
@@ -764,6 +815,7 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// </summary>
         protected override void Dispose(bool disposing)
         {
+            _pendingLoad?.Cancel();
             if (_htmlContainer != null)
             {
                 _htmlContainer.LoadComplete -= OnLoadComplete;

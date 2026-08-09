@@ -13,12 +13,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Http;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 using TheArtOfDev.HtmlRenderer.WPF.Utilities;
 using Microsoft.Win32;
 
@@ -39,7 +41,12 @@ namespace TheArtOfDev.HtmlRenderer.WPF.Adapters
         /// <summary>
         /// List of valid predefined color names in lower-case
         /// </summary>
-        private static readonly List<string> ValidColorNamesLc; 
+        private static readonly List<string> ValidColorNamesLc;
+
+        // One HttpClient shared for the adapter's (process) lifetime, not one per request - `new
+        // HttpClient()` per call is a well-documented anti-pattern that exhausts sockets under load and
+        // never observes DNS changes.
+        private static readonly HttpClient _sharedHttpClient = new HttpClient();
 
         #endregion
 
@@ -58,6 +65,14 @@ namespace TheArtOfDev.HtmlRenderer.WPF.Adapters
         /// </summary>
         private WpfAdapter()
         {
+            // Unlike the PdfSharp backend (which keeps the base RAdapter.NetworkLoader default of
+            // DataUriNetworkLoader-only - safer for unattended/server-side PDF generation, matching
+            // PeachPDF's own default), WPF is an interactive UI backend where fetching a real http(s):
+            // image or stylesheet out of the box is the expected behavior. data:/file: URIs still resolve
+            // the same way regardless (RAdapter.GetResourceStream intercepts both before ever consulting
+            // NetworkLoader), so only http(s): actually reaches this loader in practice.
+            NetworkLoader = new HttpClientNetworkLoader(_sharedHttpClient, (Uri)null);
+
             AddFontFamilyMapping("monospace", "Courier New");
             AddFontFamilyMapping("Helvetica", "Arial");
 

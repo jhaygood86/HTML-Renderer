@@ -13,6 +13,7 @@
 using PdfSharp.Drawing;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
@@ -256,9 +257,9 @@ namespace TheArtOfDev.HtmlRenderer.PdfSharp
         /// </summary>
         /// <param name="htmlSource">the html to init with, init empty if not given</param>
         /// <param name="baseCssData">optional: the stylesheet to init with, init default if not given</param>
-        public void SetHtml(string htmlSource, CssData baseCssData = null)
+        public Task SetHtml(string htmlSource, CssData baseCssData = null)
         {
-            _htmlContainerInt.SetHtml(htmlSource, baseCssData);
+            return _htmlContainerInt.SetHtml(htmlSource, baseCssData);
         }
 
         /// <summary>

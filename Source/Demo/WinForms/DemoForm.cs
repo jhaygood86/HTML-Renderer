@@ -138,13 +138,13 @@ namespace TheArtOfDev.HtmlRenderer.Demo.WinForms
         /// <summary>
         /// Create PDF using PdfSharp project, save to file and open that file.
         /// </summary>
-        private void OnGeneratePdf_Click(object sender, EventArgs e)
+        private async void OnGeneratePdf_Click(object sender, EventArgs e)
         {
             PdfGenerateConfig config = new PdfGenerateConfig();
             config.PageSize = PageSize.A4;
             config.SetMargins(20);
 
-            var doc = PdfGenerator.GeneratePdf(_mainControl.GetHtml(), config, null, DemoUtils.OnStylesheetLoad, HtmlRenderingHelper.OnImageLoadPdfSharp);
+            var doc = await PdfGenerator.GeneratePdf(_mainControl.GetHtml(), config, null, DemoUtils.OnStylesheetLoad, HtmlRenderingHelper.OnImageLoadPdfSharp);
 
             var tmpFile = Path.GetTempFileName();
             var pdfFile = Path.ChangeExtension(tmpFile, ".pdf");  // Preserves the full path

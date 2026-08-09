@@ -1522,12 +1522,18 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         protected abstract CssBoxProperties GetParent();
 
         /// <summary>
-        /// Gets the height of the font in the specified units
+        /// Gets the size of 1em in CSS pixels, per spec: an element's own computed font-size, not
+        /// the font's line-spacing metric (ascent+descent+leading), which is typically 15-30%+
+        /// larger and would inflate every em-based margin/padding/line-height. <see cref="ActualFont"/>
+        /// is created from a font-size already converted to points (<see cref="Parse.CssValueParser.ParseLength(string, double, double, string, bool, bool)"/>'s
+        /// fontAdjust factor, 72/96, applied when the declared value is in CSS px), so its own
+        /// <see cref="Adapters.RFont.Size"/> is in points too - convert back to CSS px (the unit
+        /// every other length in this engine resolves to) with the inverse, 96/72.
         /// </summary>
         /// <returns></returns>
         public double GetEmHeight()
         {
-            return ActualFont.Height;
+            return ActualFont.Size * 96d / 72d;
         }
 
         /// <summary>

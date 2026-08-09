@@ -4,6 +4,7 @@
     <OutputType>Library</OutputType>
     <RootNamespace>TheArtOfDev.HtmlRenderer</RootNamespace>
 	<GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <!-- NuGet Package Properties -->
   <PropertyGroup>

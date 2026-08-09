@@ -13,6 +13,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Dom;
@@ -105,11 +106,6 @@ namespace TheArtOfDev.HtmlRenderer.Core
         /// Handler for text selection in the html. 
         /// </summary>
         private SelectionHandler _selectionHandler;
-
-        /// <summary>
-        /// Handler for downloading of images in the html
-        /// </summary>
-        private ImageDownloader _imageDownloader;
 
         /// <summary>
         /// the text fore color use for selected text
@@ -556,7 +552,7 @@ namespace TheArtOfDev.HtmlRenderer.Core
         /// </summary>
         /// <param name="htmlSource">the html to init with, init empty if not given</param>
         /// <param name="baseCssData">optional: the stylesheet to init with, init default if not given</param>
-        public void SetHtml(string htmlSource, CssData baseCssData = null)
+        public async Task SetHtml(string htmlSource, CssData baseCssData = null)
         {
             Clear();
             _htmlSource = htmlSource;
@@ -568,12 +564,11 @@ namespace TheArtOfDev.HtmlRenderer.Core
                 _cssData = baseCssData ?? _adapter.DefaultCssData;
 
                 DomParser parser = new DomParser(_cssParser);
-                _root = parser.GenerateCssTree(htmlSource, this, ref _cssData);
+                (_root, _cssData) = await parser.GenerateCssTree(htmlSource, this, _cssData).ConfigureAwait(false);
                 _cascadeMedia = MediaQueryContext.FromAdapter(_adapter, _maxSize.Width, _maxSize.Height);
                 if (_root != null)
                 {
                     _selectionHandler = new SelectionHandler(_root);
-                    _imageDownloader = new ImageDownloader();
                 }
             }
         }
@@ -592,7 +587,12 @@ namespace TheArtOfDev.HtmlRenderer.Core
             var media = MediaQueryContext.FromAdapter(_adapter, _maxSize.Width, _maxSize.Height);
             if (!_cssData.MediaOutcomeChanged(_cascadeMedia, media)) return;
 
-            SetHtml(_htmlSource, _baseCssData);
+            // Bridges into the async SetHtml from this synchronous layout-time caller - PerformLayout
+            // itself stays synchronous (confirmed: nothing in the layout/paint call graph touches
+            // RAdapter.GetResourceStream synchronously - image loads are fire-and-forget-then-relayout,
+            // not awaited inline - so there's no reason for PerformLayout to become async), so this is a
+            // deliberate, permanent blocking call, not a temporary stopgap.
+            SetHtml(_htmlSource, _baseCssData).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -608,10 +608,6 @@ namespace TheArtOfDev.HtmlRenderer.Core
                 if (_selectionHandler != null)
                     _selectionHandler.Dispose();
                 _selectionHandler = null;
-
-                if (_imageDownloader != null)
-                    _imageDownloader.Dispose();
-                _imageDownloader = null;
 
                 _hoverBoxes = null;
             }
@@ -1081,15 +1077,6 @@ namespace TheArtOfDev.HtmlRenderer.Core
                 _hoverBoxes = new List<HoverBoxBlock>();
 
             _hoverBoxes.Add(new HoverBoxBlock(box, styleRule));
-        }
-
-        /// <summary>
-        /// Get image downloader to be used to download images for the current html rendering.<br/>
-        /// Lazy create single downloader to be used for all images in the current html.
-        /// </summary>
-        internal ImageDownloader GetImageDownloader()
-        {
-            return _imageDownloader;
         }
 
         /// <summary>

@@ -14,9 +14,11 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Net.Http;
 using System.Windows.Forms;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Adapters;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 using TheArtOfDev.HtmlRenderer.WinForms.Utilities;
 
 namespace TheArtOfDev.HtmlRenderer.WinForms.Adapters
@@ -33,6 +35,11 @@ namespace TheArtOfDev.HtmlRenderer.WinForms.Adapters
         /// </summary>
         private static readonly WinFormsAdapter _instance = new WinFormsAdapter();
 
+        // One HttpClient shared for the adapter's (process) lifetime, not one per request - `new
+        // HttpClient()` per call is a well-documented anti-pattern that exhausts sockets under load and
+        // never observes DNS changes.
+        private static readonly HttpClient _sharedHttpClient = new HttpClient();
+
         #endregion
 
 
@@ -41,6 +48,14 @@ namespace TheArtOfDev.HtmlRenderer.WinForms.Adapters
         /// </summary>
         private WinFormsAdapter()
         {
+            // Unlike the PdfSharp backend (which keeps the base RAdapter.NetworkLoader default of
+            // DataUriNetworkLoader-only - safer for unattended/server-side PDF generation, matching
+            // PeachPDF's own default), WinForms is an interactive UI backend where fetching a real
+            // http(s): image or stylesheet out of the box is the expected behavior. data:/file: URIs
+            // still resolve the same way regardless (RAdapter.GetResourceStream intercepts both before
+            // ever consulting NetworkLoader), so only http(s): actually reaches this loader in practice.
+            NetworkLoader = new HttpClientNetworkLoader(_sharedHttpClient, (Uri)null);
+
             AddFontFamilyMapping("monospace", "Courier New");
             AddFontFamilyMapping("Helvetica", "Arial");
 

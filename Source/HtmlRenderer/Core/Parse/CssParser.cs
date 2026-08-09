@@ -229,9 +229,13 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
                     // stylesheet's own location, not the document's base.
                     var resolvedHref = ResolveImportHref(importRule.Href, baseUri);
 
-                    string importedContent;
-                    CssData importedCssData;
-                    StylesheetLoadHandler.LoadStylesheet(_htmlContainer, resolvedHref, null, out importedContent, out importedCssData);
+                    // Bridges into the async StylesheetLoadHandler.LoadStylesheet from this synchronous
+                    // CssParser.ParseStyleSheet public API. Deliberately, permanently blocking: this
+                    // method is called directly from several WinForms/WPF UI controls' own public API
+                    // (HtmlPanel/HtmlLabel/HtmlToolTip's BaseStylesheet-adjacent paths), so making it async
+                    // would ripple into a much larger, unrelated public-API break well beyond this
+                    // @font-face/network conversion's scope - not a temporary stopgap awaiting a later stage.
+                    var (importedContent, importedCssData) = StylesheetLoadHandler.LoadStylesheet(_htmlContainer, resolvedHref, null).GetAwaiter().GetResult();
 
                     if (!string.IsNullOrEmpty(importedContent))
                     {

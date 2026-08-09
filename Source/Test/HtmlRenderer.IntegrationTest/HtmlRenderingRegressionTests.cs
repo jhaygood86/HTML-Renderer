@@ -24,7 +24,7 @@ public sealed class HtmlRenderingRegressionTests
     [DoNotParallelize]
     [TestMethod]
     [DynamicData(nameof(GetSamples), DynamicDataDisplayName = nameof(GetSampleDisplayName))]
-    public void Render_DemoTestSample_MatchesBaselineImage(string sampleName, string sampleHtml)
+    public async Task Render_DemoTestSample_MatchesBaselineImage(string sampleName, string sampleHtml)
     {
         EnsureSamplesLoaded();
 
@@ -42,7 +42,7 @@ public sealed class HtmlRenderingRegressionTests
         var actualPath = Path.Combine(outputDirectory, sampleFileName + ".actual.png");
         var diffPath = Path.Combine(outputDirectory, sampleFileName + ".diff.png");
 
-        using var rendered = RenderSample(sampleHtml);
+        using var rendered = await RenderSample(sampleHtml);
         if (!File.Exists(baselinePath))
         {
             if (approveBaselines)
@@ -123,9 +123,9 @@ public sealed class HtmlRenderingRegressionTests
         }
     }
 
-    private static Bitmap RenderSample(string html)
+    private static async Task<Bitmap> RenderSample(string html)
     {
-        return (Bitmap)HtmlRender.RenderToImage(
+        return (Bitmap)await HtmlRender.RenderToImageAsync(
             html,
             minSize: Size.Empty,
             maxSize: new Size(MaxWidth, MaxHeight),

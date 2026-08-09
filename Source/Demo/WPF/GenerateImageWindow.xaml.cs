@@ -11,6 +11,7 @@
 // "The Art of War"
 
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using TheArtOfDev.HtmlRenderer.Demo.Common;
@@ -33,7 +34,7 @@ namespace TheArtOfDev.HtmlRenderer.Demo.WPF
 
             InitializeComponent();
 
-            Loaded += (sender, args) => GenerateImage();
+            Loaded += async (sender, args) => await GenerateImage();
         }
 
         private void OnSaveToFile_click(object sender, RoutedEventArgs e)
@@ -53,16 +54,16 @@ namespace TheArtOfDev.HtmlRenderer.Demo.WPF
             }
         }
 
-        private void OnGenerateImage_Click(object sender, RoutedEventArgs e)
+        private async void OnGenerateImage_Click(object sender, RoutedEventArgs e)
         {
-            GenerateImage();
+            await GenerateImage();
         }
 
-        private void GenerateImage()
+        private async Task GenerateImage()
         {
             if (_imageBoxBorder.RenderSize.Width > 0 && _imageBoxBorder.RenderSize.Height > 0)
             {
-                _generatedImage = HtmlRender.RenderToImage(_html, _imageBoxBorder.RenderSize, null, DemoUtils.OnStylesheetLoad, HtmlRenderingHelper.OnImageLoad);
+                _generatedImage = await HtmlRender.RenderToImageAsync(_html, _imageBoxBorder.RenderSize, null, DemoUtils.OnStylesheetLoad, HtmlRenderingHelper.OnImageLoad);
                 _imageBox.Source = _generatedImage;
             }
         }

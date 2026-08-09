@@ -11,7 +11,7 @@ namespace HtmlRenderer.PdfSharp.Test;
 public sealed class PdfGeneratorTests
 {
     [TestMethod]
-    public void GeneratePdf_FromHtml_CreatesPdfDocument()
+    public async Task GeneratePdf_FromHtml_CreatesPdfDocument()
     {
         // Arrange
         var config = new PdfGenerateConfig
@@ -33,7 +33,7 @@ public sealed class PdfGeneratorTests
             """;
 
         // Act
-        using var document = PdfGenerator.GeneratePdf(html, config, null, DemoUtils.OnStylesheetLoad, OnImageLoadPdfSharp);
+        using var document = await PdfGenerator.GeneratePdf(html, config, null, DemoUtils.OnStylesheetLoad, OnImageLoadPdfSharp);
 
         // Assert
         Assert.AreEqual(1, document.Pages.Count);
@@ -60,7 +60,7 @@ public sealed class PdfGeneratorTests
     }
 
     [TestMethod]
-    public void GeneratePdf_FromHtml_WithMultipleFonts_CreatesPdfDocument()
+    public async Task GeneratePdf_FromHtml_WithMultipleFonts_CreatesPdfDocument()
     {
         // Arrange
         var config = new PdfGenerateConfig
@@ -86,7 +86,7 @@ public sealed class PdfGeneratorTests
             """;
 
         // Act
-        using var document = PdfGenerator.GeneratePdf(html, config, null, DemoUtils.OnStylesheetLoad, null);
+        using var document = await PdfGenerator.GeneratePdf(html, config, null, DemoUtils.OnStylesheetLoad, null);
 
         // Assert
         Assert.AreEqual(1, document.Pages.Count);

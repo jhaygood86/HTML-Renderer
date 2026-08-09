@@ -14,6 +14,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core;
@@ -312,9 +313,9 @@ namespace TheArtOfDev.HtmlRenderer.WinForms
         /// </summary>
         /// <param name="htmlSource">the html to init with, init empty if not given</param>
         /// <param name="baseCssData">optional: the stylesheet to init with, init default if not given</param>
-        public void SetHtml(string htmlSource, CssData baseCssData = null)
+        public Task SetHtml(string htmlSource, CssData baseCssData = null)
         {
-            _htmlContainerInt.SetHtml(htmlSource, baseCssData);
+            return _htmlContainerInt.SetHtml(htmlSource, baseCssData);
         }
 
         /// <summary>

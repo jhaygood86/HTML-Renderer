@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core.CssEngine;
 using TheArtOfDev.HtmlRenderer.Core.Dom;
@@ -56,15 +57,14 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
         /// <param name="htmlContainer">the html container to use for reference resolve</param>
         /// <param name="cssData">the css data to use</param>
         /// <returns>the root of the generated tree</returns>
-        public CssBox GenerateCssTree(string html, HtmlContainerInt htmlContainer, ref CssData cssData)
+        public async Task<(CssBox root, CssData cssData)> GenerateCssTree(string html, HtmlContainerInt htmlContainer, CssData cssData)
         {
             var root = HtmlParser.ParseDocument(html);
             if (root != null)
             {
                 root.HtmlContainer = htmlContainer;
 
-                bool cssDataChanged = false;
-                CascadeParseStyles(root, htmlContainer, ref cssData, ref cssDataChanged);
+                (cssData, _) = await CascadeParseStyles(root, htmlContainer, cssData, false).ConfigureAwait(false);
 
                 // The device @media queries are evaluated against: media type and colour scheme come
                 // from the platform adapter, the viewport from the container's max size (which is the
@@ -91,7 +91,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
 
                 CorrectAnonymousTables(root);
             }
-            return root;
+            return (root, cssData);
         }
 
 
@@ -106,7 +106,8 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
         /// <param name="htmlContainer">the html container to use for reference resolve</param>
         /// <param name="cssData">the style data to fill with found styles</param>
         /// <param name="cssDataChanged">check if the css data has been modified by the handled html not to change the base css data</param>
-        private void CascadeParseStyles(CssBox box, HtmlContainerInt htmlContainer, ref CssData cssData, ref bool cssDataChanged)
+        /// <returns>the (possibly cloned) css data and whether it has been cloned yet, threaded through the recursive tree walk in place of the original ref parameters (async methods cannot take ref/out parameters)</returns>
+        private async Task<(CssData cssData, bool cssDataChanged)> CascadeParseStyles(CssBox box, HtmlContainerInt htmlContainer, CssData cssData, bool cssDataChanged)
         {
             if (box.HtmlTag != null)
             {
@@ -114,11 +115,9 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
                 if (box.HtmlTag.Name.Equals("link", StringComparison.CurrentCultureIgnoreCase) &&
                     box.GetAttribute("rel", string.Empty).Equals("stylesheet", StringComparison.CurrentCultureIgnoreCase))
                 {
-                    CloneCssData(ref cssData, ref cssDataChanged);
+                    (cssData, cssDataChanged) = CloneCssData(cssData, cssDataChanged);
                     var href = box.GetAttribute("href", string.Empty);
-                    string stylesheet;
-                    CssData stylesheetData;
-                    StylesheetLoadHandler.LoadStylesheet(htmlContainer, href, box.HtmlTag.Attributes, out stylesheet, out stylesheetData);
+                    var (stylesheet, stylesheetData) = await StylesheetLoadHandler.LoadStylesheet(htmlContainer, href, box.HtmlTag.Attributes).ConfigureAwait(false);
                     if (stylesheet != null)
                         _cssParser.ParseStyleSheet(cssData, stylesheet, CommonUtils.TryGetUri(href));
                     else if (stylesheetData != null)
@@ -128,7 +127,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
                 // Check for the <style> tag
                 if (box.HtmlTag.Name.Equals("style", StringComparison.CurrentCultureIgnoreCase) && box.Boxes.Count > 0)
                 {
-                    CloneCssData(ref cssData, ref cssDataChanged);
+                    (cssData, cssDataChanged) = CloneCssData(cssData, cssDataChanged);
                     foreach (var child in box.Boxes)
                         _cssParser.ParseStyleSheet(cssData, child.Text);
                 }
@@ -136,8 +135,10 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
 
             foreach (var childBox in box.Boxes)
             {
-                CascadeParseStyles(childBox, htmlContainer, ref cssData, ref cssDataChanged);
+                (cssData, cssDataChanged) = await CascadeParseStyles(childBox, htmlContainer, cssData, cssDataChanged).ConfigureAwait(false);
             }
+
+            return (cssData, cssDataChanged);
         }
 
 
@@ -855,13 +856,13 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
         /// Clone css data if it has not already been cloned.<br/>
         /// Used to preserve the base css data used when changed by style inside html.
         /// </summary>
-        private static void CloneCssData(ref CssData cssData, ref bool cssDataChanged)
+        private static (CssData cssData, bool cssDataChanged) CloneCssData(CssData cssData, bool cssDataChanged)
         {
             if (!cssDataChanged)
             {
-                cssDataChanged = true;
-                cssData = cssData.Clone();
+                return (cssData.Clone(), true);
             }
+            return (cssData, cssDataChanged);
         }
 
         /// <summary>

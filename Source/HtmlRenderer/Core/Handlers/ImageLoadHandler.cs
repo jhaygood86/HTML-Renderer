@@ -6,15 +6,14 @@
 // like the days and months;
 // they die and are reborn,
 // like the four seasons."
-// 
+//
 // - Sun Tsu,
 // "The Art of War"
 
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
-using System.Threading;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
@@ -55,9 +54,9 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
         private readonly ActionInt<RImage, RRect, bool> _loadCompleteCallback;
 
         /// <summary>
-        /// Must be open as long as the image is in use
+        /// the resource stream the image was decoded from; kept open as long as the image is in use
         /// </summary>
-        private FileStream _imageFileStream;
+        private Stream _imageStream;
 
         /// <summary>
         /// the image instance of the loaded image
@@ -68,11 +67,6 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
         /// the image rectangle restriction as returned from image load event
         /// </summary>
         private RRect _imageRectangle;
-
-        /// <summary>
-        /// to know if image load event callback was sync or async raised
-        /// </summary>
-        private bool _asyncCallback;
 
         /// <summary>
         /// flag to indicate if to release the image object on box dispose (only if image was loaded by the box)
@@ -125,31 +119,35 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
         /// Or from URI.
         /// </summary>
         /// <remarks>
-        /// File path and URI image loading is executed async and after finishing calling <see cref="ImageLoadComplete"/>
-        /// on the main thread and not thread-pool.
+        /// File path and URI image loading is resolved against the document base and fetched through
+        /// <see cref="RAdapter.GetResourceStream"/> - uniformly for local files, <c>data:</c> URIs, and
+        /// remote HTTP(S) sources, matching how stylesheets and (eventually) <c>@font-face</c> fonts load.
+        /// When <see cref="HtmlContainerInt.AvoidAsyncImagesLoading"/> is set the fetch is awaited inline
+        /// (blocking this call) so the image is fully resolved before <see cref="LoadImage"/> returns;
+        /// otherwise it runs fire-and-forget and <see cref="ImageLoadComplete"/> requests a re-layout once
+        /// it finishes, matching this handler's pre-existing sync/async duality.
         /// </remarks>
         /// <param name="src">the source of the image to load</param>
         /// <param name="attributes">the collection of attributes on the element to use in event</param>
-        /// <returns>the image object (null if failed)</returns>
         public void LoadImage(string src, Dictionary<string, string> attributes)
         {
             try
             {
                 var args = new HtmlImageLoadEventArgs(src, attributes, OnHtmlImageLoadEventCallback);
                 _htmlContainer.RaiseHtmlImageLoadEvent(args);
-                _asyncCallback = !_htmlContainer.AvoidAsyncImagesLoading;
+                var async = !_htmlContainer.AvoidAsyncImagesLoading;
 
                 if (!args.Handled)
                 {
                     if (!string.IsNullOrEmpty(src))
                     {
-                        if (src.StartsWith("data:image", StringComparison.CurrentCultureIgnoreCase))
+                        if (async)
                         {
-                            SetFromInlineData(src);
+                            _ = LoadImageFromPathAsync(src, true);
                         }
                         else
                         {
-                            SetImageFromPath(src);
+                            LoadImageFromPathAsync(src, false).GetAwaiter().GetResult();
                         }
                     }
                     else
@@ -192,167 +190,56 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
                 if (image != null)
                 {
                     _image = _htmlContainer.Adapter.ConvertImage(image);
-                    ImageLoadComplete(_asyncCallback);
+                    ImageLoadComplete(!_htmlContainer.AvoidAsyncImagesLoading);
                 }
                 else if (!string.IsNullOrEmpty(path))
                 {
-                    SetImageFromPath(path);
+                    var async = !_htmlContainer.AvoidAsyncImagesLoading;
+                    if (async)
+                        _ = LoadImageFromPathAsync(path, true);
+                    else
+                        LoadImageFromPathAsync(path, false).GetAwaiter().GetResult();
                 }
                 else
                 {
-                    ImageLoadComplete(_asyncCallback);
+                    ImageLoadComplete(!_htmlContainer.AvoidAsyncImagesLoading);
                 }
             }
         }
 
         /// <summary>
-        /// Load the image from inline base64 encoded string data.
+        /// Resolve <paramref name="path"/> (a bare file path/URI, or a <c>data:image...</c> URI) against
+        /// the document base and fetch it through <see cref="RAdapter.GetResourceStream"/> - the same
+        /// funnel used for stylesheets, so a <c>data:</c> source needs no separate decode path from a
+        /// remote or local one.
         /// </summary>
-        /// <param name="src">the source that has the base64 encoded image</param>
-        private void SetFromInlineData(string src)
-        {
-            _image = GetImageFromData(src);
-            if (_image == null)
-                _htmlContainer.ReportError(HtmlRenderErrorType.Image, "Failed extract image from inline data");
-            _releaseImageObject = true;
-            ImageLoadComplete(false);
-        }
-
-        /// <summary>
-        /// Extract image object from inline base64 encoded data in the src of the html img element.
-        /// </summary>
-        /// <param name="src">the source that has the base64 encoded image</param>
-        /// <returns>image from base64 data string or null if failed</returns>
-        private RImage GetImageFromData(string src)
-        {
-            var s = src.Substring(src.IndexOf(':') + 1).Split(new[] { ',' }, 2);
-            if (s.Length == 2)
-            {
-                int imagePartsCount = 0, base64PartsCount = 0;
-                foreach (var part in s[0].Split(new[] { ';' }))
-                {
-                    var pPart = part.Trim();
-                    if (pPart.StartsWith("image/", StringComparison.InvariantCultureIgnoreCase))
-                        imagePartsCount++;
-                    if (pPart.Equals("base64", StringComparison.InvariantCultureIgnoreCase))
-                        base64PartsCount++;
-                }
-
-                if (imagePartsCount > 0)
-                {
-                    byte[] imageData = base64PartsCount > 0 ? Convert.FromBase64String(s[1].Trim()) : new UTF8Encoding().GetBytes(Uri.UnescapeDataString(s[1].Trim()));
-                    return _htmlContainer.Adapter.ImageFromStream(new MemoryStream(imageData));
-                }
-            }
-            return null;
-        }
-
-        /// <summary>
-        /// Load image from path of image file or URL.
-        /// </summary>
-        /// <param name="path">the file path or uri to load image from</param>
-        private void SetImageFromPath(string path)
-        {
-            var uri = CommonUtils.TryGetUri(path);
-            if (uri != null && uri.Scheme != "file")
-            {
-                SetImageFromUrl(uri);
-            }
-            else
-            {
-                var fileInfo = CommonUtils.TryGetFileInfo(uri != null ? uri.AbsolutePath : path);
-                if (fileInfo != null)
-                {
-                    SetImageFromFile(fileInfo);
-                }
-                else
-                {
-                    _htmlContainer.ReportError(HtmlRenderErrorType.Image, "Failed load image, invalid source: " + path);
-                    ImageLoadComplete(false);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Load the image file on thread-pool thread and calling <see cref="ImageLoadComplete"/> after.
-        /// </summary>
-        /// <param name="source">the file path to get the image from</param>
-        private void SetImageFromFile(FileInfo source)
-        {
-            if (source.Exists)
-            {
-                if (_htmlContainer.AvoidAsyncImagesLoading)
-                    LoadImageFromFile(source.FullName);
-                else
-                    ThreadPool.QueueUserWorkItem(state => LoadImageFromFile(source.FullName));
-            }
-            else
-            {
-                ImageLoadComplete();
-            }
-        }
-
-        /// <summary>
-        /// Load the image file on thread-pool thread and calling <see cref="ImageLoadComplete"/> after.<br/>
-        /// Calling <see cref="ImageLoadComplete"/> on the main thread and not thread-pool.
-        /// </summary>
-        /// <param name="source">the file path to get the image from</param>
-        private void LoadImageFromFile(string source)
+        private async Task LoadImageFromPathAsync(string path, bool async)
         {
             try
             {
-                var imageFileStream = File.Open(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                lock (_loadCompleteCallback)
+                var uri = CommonUtils.ResolveAgainstDocumentBase(_htmlContainer, path);
+                if (uri == null)
                 {
-                    _imageFileStream = imageFileStream;
-                    if (!_disposed)
-                        _image = _htmlContainer.Adapter.ImageFromStream(_imageFileStream);
+                    _htmlContainer.ReportError(HtmlRenderErrorType.Image, "Failed load image, invalid source: " + path);
+                    ImageLoadComplete(async);
+                    return;
+                }
+
+                var networkResponse = await _htmlContainer.Adapter.GetResourceStream(uri).ConfigureAwait(false);
+
+                if (!_disposed && networkResponse != null && networkResponse.ResourceStream != null)
+                {
+                    _imageStream = networkResponse.ResourceStream;
+                    _image = _htmlContainer.Adapter.ImageFromStream(_imageStream);
                     _releaseImageObject = true;
                 }
-                ImageLoadComplete();
+
+                ImageLoadComplete(async);
             }
             catch (Exception ex)
             {
-                _htmlContainer.ReportError(HtmlRenderErrorType.Image, "Failed to load image from disk: " + source, ex);
-                ImageLoadComplete();
-            }
-        }
-
-        /// <summary>
-        /// Load image from the given URI by downloading it.<br/>
-        /// Create local file name in temp folder from the URI, if the file already exists use it as it has already been downloaded.
-        /// If not download the file.
-        /// </summary>
-        private void SetImageFromUrl(Uri source)
-        {
-            var filePath = CommonUtils.GetLocalfileName(source);
-            if (filePath.Exists && filePath.Length > 0)
-            {
-                SetImageFromFile(filePath);
-            }
-            else
-            {
-                _htmlContainer.GetImageDownloader().DownloadImage(source, filePath.FullName, !_htmlContainer.AvoidAsyncImagesLoading, OnDownloadImageCompleted);
-            }
-        }
-
-        /// <summary>
-        /// On download image complete to local file use <see cref="LoadImageFromFile"/> to load the image file.<br/>
-        /// If the download canceled do nothing, if failed report error.
-        /// </summary>
-        private void OnDownloadImageCompleted(Uri imageUri, string filePath, Exception error, bool canceled)
-        {
-            if (!canceled && !_disposed)
-            {
-                if (error == null)
-                {
-                    LoadImageFromFile(filePath);
-                }
-                else
-                {
-                    _htmlContainer.ReportError(HtmlRenderErrorType.Image, "Failed to load image from URL: " + imageUri, error);
-                    ImageLoadComplete();
-                }
+                _htmlContainer.ReportError(HtmlRenderErrorType.Image, "Failed to load image from source: " + path, ex);
+                ImageLoadComplete(async);
             }
         }
 
@@ -373,18 +260,15 @@ namespace TheArtOfDev.HtmlRenderer.Core.Handlers
         /// </summary>
         private void ReleaseObjects()
         {
-            lock (_loadCompleteCallback)
+            if (_releaseImageObject && _image != null)
             {
-                if (_releaseImageObject && _image != null)
-                {
-                    _image.Dispose();
-                    _image = null;
-                }
-                if (_imageFileStream != null)
-                {
-                    _imageFileStream.Dispose();
-                    _imageFileStream = null;
-                }
+                _image.Dispose();
+                _image = null;
+            }
+            if (_imageStream != null)
+            {
+                _imageStream.Dispose();
+                _imageStream = null;
             }
         }
 

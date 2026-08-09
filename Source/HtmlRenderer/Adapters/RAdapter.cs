@@ -14,10 +14,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Handlers;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 using TheArtOfDev.HtmlRenderer.Core.Utils;
 
 namespace TheArtOfDev.HtmlRenderer.Adapters
@@ -119,6 +121,81 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
             var handler = ColorSchemeChanged;
             if (handler != null)
                 handler(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Controls how the root HTML document and every external resource it references (stylesheets,
+        /// images, <c>@font-face</c> fonts) is loaded. Defaults to <see cref="DataUriNetworkLoader"/>,
+        /// which only resolves <c>data:</c> URIs — set this to a <see cref="FileUriNetworkLoader"/> or
+        /// <see cref="HttpClientNetworkLoader"/> (or a custom <see cref="Network.RNetworkLoader"/>) to
+        /// enable loading from local files or over HTTP(S).
+        /// </summary>
+        public RNetworkLoader NetworkLoader { get; set; } = new DataUriNetworkLoader();
+
+        /// <summary>
+        /// Whether <c>file:</c> resource requests are honored. Checked ahead of, and independently from,
+        /// whether <see cref="NetworkLoader"/> happens to be a <see cref="FileUriNetworkLoader"/> — a
+        /// <c>false</c> value refuses local file access even then. Defaults to <c>true</c>.
+        /// </summary>
+        public bool AllowLocalFileAccess { get; set; } = true;
+
+        // Serves file: URIs (and supplies the default working-directory base URI) whenever the configured
+        // NetworkLoader isn't itself a FileUriNetworkLoader - mirroring how data: URIs are always handled
+        // internally regardless of which loader is configured. Lazily created so its
+        // Directory.GetCurrentDirectory() snapshot isn't taken until a file: resource (or the fallback base
+        // URI) is actually needed.
+        private FileUriNetworkLoader _internalFileLoader;
+        private FileUriNetworkLoader InternalFileLoader => _internalFileLoader ?? (_internalFileLoader = new FileUriNetworkLoader());
+
+        /// <summary>
+        /// The document's base URL, used to resolve relative <c>href</c>/<c>src</c>/CSS <c>url()</c>
+        /// references that have no closer <c>&lt;base href&gt;</c> element to resolve against. Sourced from
+        /// <see cref="NetworkLoader"/>'s own base URI when it has one; otherwise (e.g. the default
+        /// <see cref="DataUriNetworkLoader"/>, which has none) falls back to the current working directory
+        /// as a <c>file:</c> URI when local file access is allowed, or <c>null</c> when it is not.
+        /// </summary>
+        public RUri BaseUri => NetworkLoader.BaseUri ?? (AllowLocalFileAccess ? InternalFileLoader.BaseUri : null);
+
+        /// <summary>
+        /// Resolve an external resource (a stylesheet, image, or <c>@font-face</c> font) referenced by the
+        /// document, dispatching by URI scheme: <c>data:</c> and <c>file:</c> always resolve internally
+        /// (the latter refused outright when <see cref="AllowLocalFileAccess"/> is <c>false</c>), every
+        /// other scheme goes to the configured <see cref="NetworkLoader"/>.
+        /// </summary>
+        /// <param name="uri">the resource URI, already resolved to absolute against <see cref="BaseUri"/> or a <c>&lt;base href&gt;</c> element</param>
+        /// <returns>the resolved resource, or null if it could not be resolved</returns>
+        public Task<RNetworkResponse> GetResourceStream(RUri uri)
+        {
+            // BaseUri is normally never null, so every reference resolves to an absolute URI and loaders
+            // only ever see those - RUri.Scheme throws on a relative URI, and neither DataUriNetworkLoader
+            // nor HttpClientNetworkLoader checks. Denying local file access is what makes BaseUri nullable,
+            // so a relative reference can now survive resolution; answer "unresolved" for it here rather
+            // than handing a loader a URI it cannot inspect.
+            if (!uri.IsAbsoluteUri)
+            {
+                return Task.FromResult<RNetworkResponse>(null);
+            }
+
+            if (uri.Scheme == "data")
+            {
+                var dataLoader = NetworkLoader as DataUriNetworkLoader ?? new DataUriNetworkLoader();
+                return dataLoader.GetResourceStream(uri);
+            }
+
+            if (uri.Scheme == "file")
+            {
+                // Checked ahead of the configured loader, so a deny holds even when that loader is itself a
+                // FileUriNetworkLoader - the two settings contradict each other, and refusing is the safe read.
+                if (!AllowLocalFileAccess)
+                {
+                    return Task.FromResult<RNetworkResponse>(null);
+                }
+
+                var fileLoader = NetworkLoader as FileUriNetworkLoader ?? InternalFileLoader;
+                return fileLoader.GetResourceStream(uri);
+            }
+
+            return NetworkLoader.GetResourceStream(uri);
         }
 
         /// <summary>

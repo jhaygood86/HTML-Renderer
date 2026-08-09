@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Float wrap</title>
+    </head>
+    <body>
+        <div style="float: left; width: 80px; height: 80px; background-color: #4a90d9; margin: 0 10px 10px 0;"></div>
+        <div style="float: right; width: 80px; height: 60px; background-color: #d94a4a; margin: 0 0 10px 10px;"></div>
+        <p style="margin: 0;">This paragraph wraps around a blue box floated left and a red box floated right, so its lines should narrow to avoid both floats until the text runs past their bottom edges and returns to the full available width for the remaining lines of text in this paragraph.</p>
+        <div style="clear: both; background-color: #cccccc; padding: 4px;">This div has clear: both and should start below both floated boxes, not overlap them.</div>
+    </body>
+</html>

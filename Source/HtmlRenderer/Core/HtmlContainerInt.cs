@@ -193,6 +193,11 @@ namespace TheArtOfDev.HtmlRenderer.Core
         private RSize _actualSize;
 
         /// <summary>
+        /// True if any box in the current document tree has float:left or float:right set.
+        /// </summary>
+        private bool _hasFloatedBoxes;
+
+        /// <summary>
         /// the top margin between the page start and the text
         /// </summary>
         private int _marginTop;
@@ -428,6 +433,16 @@ namespace TheArtOfDev.HtmlRenderer.Core
         {
             get { return _actualSize; }
             set { _actualSize = value; }
+        }
+
+        /// <summary>
+        /// True if any box in the current document tree has float:left or float:right set.<br/>
+        /// Computed once per <see cref="PerformLayout"/> pass by a whole-tree walk; used to short-circuit
+        /// float-intersection queries (each an O(document) tree walk) on the common case of a float-free document.
+        /// </summary>
+        public bool HasFloatedBoxes
+        {
+            get { return _hasFloatedBoxes; }
         }
 
         public RSize PageSize { get; set; }
@@ -698,6 +713,7 @@ namespace TheArtOfDev.HtmlRenderer.Core
                 // if width is not restricted we set it to large value to get the actual later
                 _root.Size = new RSize(_maxSize.Width > 0 ? _maxSize.Width : 99999, 0);
                 _root.Location = _location;
+                _hasFloatedBoxes = ComputeHasFloatedBoxes(_root);
                 _root.PerformLayout(g);
 
                 if (_maxSize.Width <= 0.1)
@@ -705,6 +721,7 @@ namespace TheArtOfDev.HtmlRenderer.Core
                     // in case the width is not restricted we need to double layout, first will find the width so second can layout by it (center alignment)
                     _root.Size = new RSize((int)Math.Ceiling(_actualSize.Width), 0);
                     _actualSize = RSize.Empty;
+                    _hasFloatedBoxes = ComputeHasFloatedBoxes(_root);
                     _root.PerformLayout(g);
                 }
 
@@ -716,6 +733,23 @@ namespace TheArtOfDev.HtmlRenderer.Core
                         handler(this, EventArgs.Empty);
                 }
             }
+        }
+
+        /// <summary>
+        /// Recursively checks whether any box in the tree has float:left or float:right set.
+        /// </summary>
+        private static bool ComputeHasFloatedBoxes(CssBox box)
+        {
+            if (box.IsFloated)
+                return true;
+
+            foreach (var child in box.Boxes)
+            {
+                if (ComputeHasFloatedBoxes(child))
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>

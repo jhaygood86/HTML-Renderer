@@ -128,12 +128,15 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     int diff = 1;
                     CssBox sib = b.ParentBox.Boxes[index - diff];
 
-                    while ((sib.Display == CssConstants.None || sib.Position == CssConstants.Absolute || sib.Position == CssConstants.Fixed) && index - diff - 1 >= 0)
+                    // floated siblings are removed from normal flow: a subsequent sibling's static
+                    // position must be computed as if they weren't there (CSS 2.1 9.5), so they're
+                    // skipped exactly like display:none boxes are.
+                    while ((sib.Display == CssConstants.None || sib.Position == CssConstants.Absolute || sib.Position == CssConstants.Fixed || sib.IsFloated) && index - diff - 1 >= 0)
                     {
                         sib = b.ParentBox.Boxes[index - ++diff];
                     }
 
-                    return (sib.Display == CssConstants.None || sib.Position == CssConstants.Fixed) ? null : sib;
+                    return (sib.Display == CssConstants.None || sib.Position == CssConstants.Fixed || sib.IsFloated) ? null : sib;
                 }
             }
             return null;
@@ -225,6 +228,169 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// The candidate rectangle being tested against existing floats, either during float placement
+        /// (<see cref="CssLayoutEngine"/>'s FloatBoxLeft/FloatBoxRight) or while flowing a line's inline
+        /// content around already-placed floats (<see cref="GetLastLeftIntersectingFloatBox"/>/
+        /// <see cref="GetLastRightIntersectingFloatBox"/>). Ported from PeachPDF.
+        /// </summary>
+        internal sealed class CssFloatCoordinates
+        {
+            public double Left;
+            public double Right;
+            public double Top;
+            public double MaxBottom;
+            public double MarginLeft;
+            public double MarginRight;
+            public double ReferenceWidth;
+
+            public double FloatRightStartX
+            {
+                // Right is already margin-right-adjusted (FloatBoxRight sets Right = limitRight -
+                // box.ActualMarginRight), so subtracting MarginLeft here too pulled a right-floated
+                // box's own right edge inward by its own left margin - a box's left margin is space
+                // to its own left and must not affect where its own right edge lands (the left-float
+                // counterpart never double-applies a margin term either). Ported from PeachPDF
+                // (jhaygood86/PeachPDF#688).
+                get { return Right - ReferenceWidth; }
+            }
+        }
+
+        /// <summary>
+        /// Finds the first floated box that intersects <paramref name="coordinates"/> for the given float
+        /// direction, searching in document order: climb from <paramref name="reference"/> up to the root,
+        /// scanning each level's preceding siblings' whole subtrees. There is no dedicated float list
+        /// anywhere - this is a live tree search, ported from PeachPDF. Short-circuits immediately (no
+        /// walk at all) for the common case of a document with no floated boxes.
+        /// </summary>
+        internal static CssBox GetFirstIntersectingFloatBox(CssBox reference, CssFloatCoordinates coordinates, string floatDirection)
+        {
+            if (reference.HtmlContainer == null || !reference.HtmlContainer.HasFloatedBoxes)
+                return null;
+
+            while (true)
+            {
+                if (reference.ParentBox == null)
+                    return null;
+
+                var currentBoxIdx = reference.ParentBox.Boxes.IndexOf(reference);
+
+                for (int i = 0; i < currentBoxIdx; i++)
+                {
+                    var next = GetNextIntersectingFloatBox(reference.ParentBox.Boxes[i], coordinates, floatDirection);
+                    if (next != null)
+                        return next;
+                }
+
+                reference = reference.ParentBox;
+            }
+        }
+
+        /// <summary>
+        /// Finds the last (rightmost) left-floated box obstructing <paramref name="curx"/> at row
+        /// <paramref name="cury"/>, walking past any chain of contiguous left floats. Used while flowing a
+        /// line's inline content: the result's right edge is where the line's content may start.
+        /// Margins are taken from <paramref name="box"/> (the box whose leading edge is being placed),
+        /// matching the caller's convention at each of its call sites.
+        /// </summary>
+        internal static CssBox GetLastLeftIntersectingFloatBox(CssBox box, double curx, double cury, double maxRight, double maxbottom)
+        {
+            var left = curx;
+            CssBox lastIntersectingFloat = null;
+
+            // Bounded by a flat iteration count, matching PeachPDF: the number of distinct floats in a
+            // real document is always finite, and this loop's only job is to walk past each one once.
+            var iterations = 0;
+            while (iterations++ < 10000)
+            {
+                var floatCoordinates = new CssFloatCoordinates
+                {
+                    Left = left,
+                    Top = cury,
+                    MarginLeft = box.ActualMarginLeft,
+                    MarginRight = box.ActualMarginRight,
+                    MaxBottom = maxbottom,
+                    ReferenceWidth = 0,
+                    Right = maxRight
+                };
+
+                var intersectingFloat = GetFirstIntersectingFloatBox(box, floatCoordinates, CssConstants.Left);
+                if (intersectingFloat == null)
+                    break;
+
+                left = intersectingFloat.ActualRight + intersectingFloat.ActualMarginRight;
+                lastIntersectingFloat = intersectingFloat;
+            }
+
+            return lastIntersectingFloat;
+        }
+
+        /// <summary>
+        /// A right float's constraint on a line is unlike a left float's: a left float caps where the
+        /// cursor itself currently sits (a point-collision test, correct in
+        /// <see cref="GetLastLeftIntersectingFloatBox"/> above), but a right float caps how far right
+        /// the cursor is allowed to reach in advance - a lookahead, independent of the cursor's current
+        /// position or the word being placed. Reusing the point-collision test here (querying
+        /// <see cref="GetFirstIntersectingFloatBox"/> in <see cref="CssConstants.Left"/> mode, as an
+        /// earlier version of this method did) can only detect the float once the cursor has already
+        /// walked into its span, never before - so this scans for every float:right box whose vertical
+        /// span covers the current row and returns the one with the smallest left edge, which is the
+        /// actual binding constraint regardless of where the cursor is right now. Ported from PeachPDF
+        /// (jhaygood86/PeachPDF#687).
+        /// </summary>
+        internal static CssBox GetLastRightIntersectingFloatBox(CssBox box, double top)
+        {
+            if (box.HtmlContainer == null || !box.HtmlContainer.HasFloatedBoxes)
+                return null;
+
+            return FindNarrowestRightFloatBox(box, top);
+        }
+
+        /// <summary>
+        /// Same ancestor/preceding-sibling traversal shape as <see cref="GetFirstIntersectingFloatBox"/>'s
+        /// walk, but accumulates the narrowest match across the whole walk instead of returning on the
+        /// first hit - the wrap-limit query needs the binding constraint among every float:right box
+        /// covering this row, not merely the first one the traversal order happens to reach.
+        /// </summary>
+        private static CssBox FindNarrowestRightFloatBox(CssBox reference, double top)
+        {
+            CssBox narrowest = null;
+            var narrowestLeft = double.PositiveInfinity;
+
+            while (reference.ParentBox != null)
+            {
+                var currentBoxIdx = reference.ParentBox.Boxes.IndexOf(reference);
+
+                for (int i = 0; i < currentBoxIdx; i++)
+                {
+                    ScanForNarrowestRightFloatBox(reference.ParentBox.Boxes[i], top, ref narrowest, ref narrowestLeft);
+                }
+
+                reference = reference.ParentBox;
+            }
+
+            return narrowest;
+        }
+
+        private static void ScanForNarrowestRightFloatBox(CssBox box, double top, ref CssBox narrowest, ref double narrowestLeft)
+        {
+            if (box.Float == CssConstants.Right && box.Location.Y <= top && top < box.ActualBottom)
+            {
+                var left = box.Location.X - box.ActualMarginLeft;
+
+                if (left < narrowestLeft)
+                {
+                    narrowestLeft = left;
+                    narrowest = box;
+                }
+            }
+
+            foreach (var childBox in box.Boxes)
+            {
+                ScanForNarrowestRightFloatBox(childBox, top, ref narrowest, ref narrowestLeft);
+            }
         }
 
         /// <summary>
@@ -551,6 +717,56 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
 
 
         #region Private methods
+
+        /// <summary>
+        /// Recursively scans <paramref name="box"/> and its descendants, in document order, for the first
+        /// floated box intersecting <paramref name="coordinates"/>.
+        /// </summary>
+        private static CssBox GetNextIntersectingFloatBox(CssBox box, CssFloatCoordinates coordinates, string floatDirection)
+        {
+            if (IsFloatIntersecting(coordinates, floatDirection, box))
+                return box;
+
+            foreach (var childBox in box.Boxes)
+            {
+                var foundBox = GetNextIntersectingFloatBox(childBox, coordinates, floatDirection);
+                if (foundBox != null)
+                    return foundBox;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Whether <paramref name="targetBox"/> (if floated) collides with the candidate placement
+        /// described by <paramref name="coordinates"/>: a vertical band test (does targetBox's row range
+        /// cover coordinates.Top) plus a side-specific horizontal test.
+        /// </summary>
+        private static bool IsFloatIntersecting(CssFloatCoordinates coordinates, string floatDirection, CssBox targetBox)
+        {
+            if (!targetBox.IsFloated)
+                return false;
+
+            if (!(coordinates.Top < targetBox.ActualBottom) || !(targetBox.Location.Y <= coordinates.Top))
+                return false;
+
+            var targetRight = targetBox.ActualRight + targetBox.ActualMarginRight;
+            var targetLeft = targetBox.Location.X - targetBox.ActualMarginLeft;
+            var currentLeft = coordinates.Left - coordinates.MarginLeft;
+
+            if (floatDirection == CssConstants.Left)
+                return targetRight > currentLeft && targetLeft <= currentLeft;
+
+            if (floatDirection == CssConstants.Right)
+                // Before FloatRightStartX's own fix (above), its erroneous -MarginLeft term happened
+                // to cancel this +MarginLeft, leaving the correct margin-box right edge
+                // (Right + MarginRight) by coincidence. With FloatRightStartX corrected, this leftover
+                // +MarginLeft must go too, or the threshold is inflated by the box's own left margin -
+                // ported from PeachPDF (jhaygood86/PeachPDF#688).
+                return targetLeft > coordinates.FloatRightStartX + coordinates.ReferenceWidth + coordinates.MarginRight;
+
+            return false;
+        }
 
         /// <summary>
         /// Get selected plain text of the given html sub-tree.<br/>

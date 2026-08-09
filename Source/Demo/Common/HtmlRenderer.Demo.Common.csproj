@@ -73,6 +73,7 @@
     <EmbeddedResource Include="TestSamples\33.Fixed position.htm" />
     <EmbeddedResource Include="TestSamples\34.Breaking pages 1 - Paragraphs.htm" />
     <EmbeddedResource Include="TestSamples\35.Breaking pages 2 - Tables.htm" />
+    <EmbeddedResource Include="TestSamples\36.Float wrap.htm" />
     <EmbeddedResource Include="Samples\00.Intro.htm" />
     <EmbeddedResource Include="Samples\01.History.htm" />
     <EmbeddedResource Include="Samples\02.Text.htm" />

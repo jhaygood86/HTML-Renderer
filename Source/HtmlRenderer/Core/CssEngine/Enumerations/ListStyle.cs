@@ -14,6 +14,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.CssEngine
         LowerLatin,
         UpperLatin,
         Armenian,
-        Georgian
+        Georgian,
+        Hebrew
     }
 }

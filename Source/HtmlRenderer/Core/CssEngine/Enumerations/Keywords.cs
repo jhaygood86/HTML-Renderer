@@ -189,6 +189,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.CssEngine
         public static readonly string UpperLatin = "upper-latin";
         public static readonly string Armenian = "armenian";
         public static readonly string Georgian = "georgian";
+        public static readonly string Hebrew = "hebrew";
         public static readonly string LowerAlpha = "lower-alpha";
         public static readonly string UpperAlpha = "upper-alpha";
         public static readonly string XxSmall = "xx-small";

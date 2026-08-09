@@ -166,8 +166,11 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
         }
 
         /// <summary>
-        /// Parse a complex font family css property to check if it contains multiple fonts and if the font exists.<br/>
-        /// returns the font family name to use or 'inherit' if failed.
+        /// Parse a "font-family" value - possibly a comma-separated fallback list, each candidate
+        /// possibly quoted (e.g. <c>'Helvetica Neue', Arial, sans-serif</c>) - into the first
+        /// candidate that's actually installed/registered, or <see cref="CssConstants.DefaultFont"/>
+        /// if none of them are. Previously returned the literal string "inherit" as a not-found
+        /// sentinel, which was confusable with the real CSS <c>inherit</c> keyword downstream.
         /// </summary>
         /// <param name="value">the font-family value to parse</param>
         /// <returns>parsed font-family value</returns>
@@ -196,7 +199,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
                 start = end + 1;
             }
 
-            return CssConstants.Inherit;
+            return CssConstants.DefaultFont;
         }
 
         #region Private methods

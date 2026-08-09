@@ -178,6 +178,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.CssEngine
                 {Keywords.UpperLatin, ListStyle.UpperLatin},
                 {Keywords.Armenian, ListStyle.Armenian},
                 {Keywords.Georgian, ListStyle.Georgian},
+                {Keywords.Hebrew, ListStyle.Hebrew},
                 {Keywords.LowerAlpha, ListStyle.LowerLatin},
                 {Keywords.UpperAlpha, ListStyle.UpperLatin},
                 {Keywords.None, ListStyle.None}

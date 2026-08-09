@@ -47,11 +47,19 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
             }
         };
 
+        /// <summary>
+        /// Table to convert numbers into hebrew digits - CSS Counter Styles Level 3 §6.1's "hebrew"
+        /// <c>@counter-style</c>. Row 3 (thousands) is each units-row letter with a geresh (U+05F3)
+        /// appended, per the spec's additive-symbols list (e.g. 1000 is the same letter as 1 plus a
+        /// geresh) - a 3-row table silently drops the thousands digit entirely for any value >= 1000.
+        /// 15 and 16 need a further, non-tabular override - see <see cref="ConvertToAlphaNumber"/>.
+        /// </summary>
         private static readonly string[,] _hebrewDigitsTable =
         {
             { "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט" },
             { "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ" },
-            { "ק", "ר", "ש", "ת", "תק", "תר", "תש", "תת", "תתק", }
+            { "ק", "ר", "ש", "ת", "תק", "תר", "תש", "תת", "תתק", },
+            { "א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ז׳", "ח׳", "ט׳" }
         };
 
         private static readonly string[,] _georgianDigitsTable =
@@ -61,11 +69,18 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
             { "რ", "ს", "ტ", "ჳ", "ფ", "ქ", "ღ", "ყ", "შ" }
         };
 
+        /// <summary>
+        /// Table to convert numbers into armenian digits - CSS Counter Styles Level 3 §6.1's
+        /// "armenian" <c>@counter-style</c>. Row 3 (thousands) added for the same reason as
+        /// <see cref="_hebrewDigitsTable"/>'s - a 3-row table silently drops the thousands digit for
+        /// any value >= 1000.
+        /// </summary>
         private static readonly string[,] _armenianDigitsTable =
         {
             { "Ա", "Բ", "Գ", "Դ", "Ե", "Զ", "Է", "Ը", "Թ" },
             { "Ժ", "Ի", "Լ", "Խ", "Ծ", "Կ", "Հ", "Ձ", "Ղ" },
-            { "Ճ", "Մ", "Յ", "Ն", "Շ", "Ո", "Չ", "Պ", "Ջ" }
+            { "Ճ", "Մ", "Յ", "Ն", "Շ", "Ո", "Չ", "Պ", "Ջ" },
+            { "Ռ", "Ս", "Վ", "Տ", "Ր", "Ց", "Ւ", "Փ", "Ք" }
         };
 
         private static readonly string[] _hiraganaDigitsTable = new[]
@@ -378,7 +393,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
             }
             else if (style.Equals(CssConstants.Hebrew, StringComparison.InvariantCultureIgnoreCase))
             {
-                return ConvertToSpecificNumbers(number, _hebrewDigitsTable);
+                return ConvertToHebrewNumber(number);
             }
             else if (style.Equals(CssConstants.Hiragana, StringComparison.InvariantCultureIgnoreCase) || style.Equals(CssConstants.HiraganaIroha, StringComparison.InvariantCultureIgnoreCase))
             {
@@ -467,6 +482,27 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                 number -= digit * i;
             }
             return lowercase ? sb.ToLower() : sb;
+        }
+
+        /// <summary>
+        /// Hebrew's additive algorithm (<see cref="ConvertToSpecificNumbers"/> over
+        /// <see cref="_hebrewDigitsTable"/>) with the CSS Counter Styles Level 3 §6.1 override for a
+        /// tens-and-units value of 15 or 16: the naive per-digit-group combination would produce יה/יו,
+        /// which closely resembles the Tetragrammaton, so the spec mandates טו/טז instead. 17-19 don't
+        /// need an override - their naive combination (יז/יח/יט) already matches the spec's table.
+        /// </summary>
+        /// <param name="number">the number to convert</param>
+        /// <returns>the hebrew number string</returns>
+        private static string ConvertToHebrewNumber(int number)
+        {
+            var tensAndUnits = number % 100;
+            if (tensAndUnits is 15 or 16)
+            {
+                var hundredsAndUp = ConvertToSpecificNumbers(number - tensAndUnits, _hebrewDigitsTable);
+                return hundredsAndUp + (tensAndUnits == 15 ? "טו" : "טז");
+            }
+
+            return ConvertToSpecificNumbers(number, _hebrewDigitsTable);
         }
 
         /// <summary>

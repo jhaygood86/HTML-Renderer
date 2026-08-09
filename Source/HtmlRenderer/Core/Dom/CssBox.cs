@@ -189,11 +189,13 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         }
 
         /// <summary>
-        /// Is the css box clickable (by default only "a" element is clickable)
+        /// Is the css box clickable (by default only "a" elements that are actual hyperlinks - i.e.
+        /// have an "href" - are clickable; an "a" used only as a named anchor/target has no href and
+        /// is not clickable, matching the same "href" gate CSS uses for the :link pseudo-class).
         /// </summary>
         public virtual bool IsClickable
         {
-            get { return HtmlTag != null && HtmlTag.Name == HtmlConstants.A && !HtmlTag.HasAttribute("id"); }
+            get { return HtmlTag != null && HtmlTag.Name == HtmlConstants.A && HtmlTag.HasAttribute("href"); }
         }
 
         /// <summary>
@@ -1451,21 +1453,6 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             if (string.IsNullOrEmpty(TextDecoration) || TextDecoration == CssConstants.None)
                 return;
 
-            double y = 0f;
-            if (TextDecoration == CssConstants.Underline)
-            {
-                y = Math.Round(rectangle.Top + ActualFont.UnderlineOffset);
-            }
-            else if (TextDecoration == CssConstants.LineThrough)
-            {
-                y = rectangle.Top + rectangle.Height / 2f;
-            }
-            else if (TextDecoration == CssConstants.Overline)
-            {
-                y = rectangle.Top;
-            }
-            y -= ActualPaddingBottom - ActualBorderBottomWidth;
-
             double x1 = rectangle.X;
             if (isFirst)
                 x1 += ActualPaddingLeft + ActualBorderLeftWidth;
@@ -1474,10 +1461,36 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             if (isLast)
                 x2 -= ActualPaddingRight + ActualBorderRightWidth;
 
+            var bottomInset = ActualPaddingBottom - ActualBorderBottomWidth;
             var pen = g.GetPen(ActualColor);
             pen.Width = 1;
             pen.DashStyle = RDashStyle.Solid;
-            g.DrawLine(pen, x1, y, x2, y);
+
+            // text-decoration-line may list several space-separated line keywords (e.g. "underline
+            // overline") - draw each one present rather than only the first/only value.
+            foreach (var line in TextDecoration.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                double y;
+                if (line == CssConstants.Underline)
+                {
+                    y = Math.Round(rectangle.Top + ActualFont.UnderlineOffset);
+                }
+                else if (line == CssConstants.LineThrough)
+                {
+                    y = rectangle.Top + rectangle.Height / 2f;
+                }
+                else if (line == CssConstants.Overline)
+                {
+                    y = rectangle.Top;
+                }
+                else
+                {
+                    continue;
+                }
+
+                y -= bottomInset;
+                g.DrawLine(pen, x1, y, x2, y);
+            }
         }
 
         /// <summary>

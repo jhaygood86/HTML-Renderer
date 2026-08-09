@@ -11,9 +11,12 @@
 // "The Art of War"
 
 using System;
+using System.Linq;
 using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core.CssEngine;
 using TheArtOfDev.HtmlRenderer.Core.Handlers;
+using TheArtOfDev.HtmlRenderer.Core.Parse;
 using TheArtOfDev.HtmlRenderer.Core.Utils;
 
 namespace TheArtOfDev.HtmlRenderer.Core.Dom
@@ -73,7 +76,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             if (_imageLoadHandler == null)
             {
                 _imageLoadHandler = new ImageLoadHandler(HtmlContainer, OnLoadImageComplete);
-                _imageLoadHandler.LoadImage(GetAttribute("src"), HtmlTag != null ? HtmlTag.Attributes : null);
+                _imageLoadHandler.LoadImage(GetImageSource(), HtmlTag != null ? HtmlTag.Attributes : null);
             }
 
             var rect = CommonUtils.GetFirstValueOrDefault(Rectangles);
@@ -142,11 +145,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                 if (_imageLoadHandler == null && (HtmlContainer.AvoidAsyncImagesLoading || HtmlContainer.AvoidImagesLateLoading))
                 {
                     _imageLoadHandler = new ImageLoadHandler(HtmlContainer, OnLoadImageComplete);
-
-                    if (this.Content != null && this.Content != CssConstants.Normal)
-                        _imageLoadHandler.LoadImage(this.Content, HtmlTag != null ? HtmlTag.Attributes : null);
-                    else
-                        _imageLoadHandler.LoadImage(GetAttribute("src"), HtmlTag != null ? HtmlTag.Attributes : null);
+                    _imageLoadHandler.LoadImage(GetImageSource(), HtmlTag != null ? HtmlTag.Attributes : null);
                 }
 
                 MeasureWordSpacing(g);
@@ -168,6 +167,28 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
 
 
         #region Private methods
+
+        /// <summary>
+        /// Get the image source to load: a resolved <c>content: url(...)</c> value takes precedence
+        /// over the "src" attribute (CSS generated content replacing the element's own rendering, same
+        /// as this engine already gives generated content priority for pseudo-elements), falling back
+        /// to "src" when content is unset/none/normal or isn't a url().<br/>
+        /// <see cref="CssBox.Content"/> holds the literal declared CSS text (e.g. <c>url('data:...')</c>,
+        /// quotes and all) rather than an unwrapped source string, so the url() token's data has to be
+        /// pulled out here - <see cref="ImageLoadHandler.LoadImage"/> only recognizes a bare path or
+        /// "data:image..." URI, not CSS function syntax.
+        /// </summary>
+        private string GetImageSource()
+        {
+            if (!string.IsNullOrEmpty(Content) && Content != CssConstants.Normal && Content != CssConstants.None)
+            {
+                var token = CssValueParser.GetCssTokens(Content).FirstOrDefault();
+                if (token is UrlToken urlToken)
+                    return urlToken.Data;
+            }
+
+            return GetAttribute("src");
+        }
 
         /// <summary>
         /// Set error image border on the image box.

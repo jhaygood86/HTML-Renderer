@@ -52,7 +52,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             var text = Resolve(box, content);
             if (!string.IsNullOrEmpty(text))
             {
-                box.Text = new SubString(text);
+                box.Text = text;
             }
         }
 

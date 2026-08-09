@@ -50,7 +50,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
             "page-break-inside", "left", "top", "width", "max-width", "height",
             "background-color", "background-image", "background-position", "background-repeat",
             "content", "color", "display", "direction", "empty-cells", "float", "position",
-            "line-height", "vertical-align", "text-indent", "text-align", "text-decoration",
+            "line-height", "vertical-align", "text-indent", "text-align", "text-decoration-line",
             "white-space", "word-break", "visibility", "word-spacing",
             "font-family", "font-size", "font-style", "font-variant", "font-weight",
             "list-style", "list-style-position", "list-style-image", "list-style-type",
@@ -189,7 +189,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     return cssBox.TextIndent;
                 case "text-align":
                     return cssBox.TextAlign;
-                case "text-decoration":
+                case "text-decoration-line":
                     return cssBox.TextDecoration;
                 case "white-space":
                     return cssBox.WhiteSpace;
@@ -378,7 +378,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                 case "text-align":
                     cssBox.TextAlign = value;
                     break;
-                case "text-decoration":
+                case "text-decoration-line":
                     cssBox.TextDecoration = value;
                     break;
                 case "white-space":

@@ -187,7 +187,7 @@ namespace TheArtOfDev.HtmlRenderer.Core
             { "padding-top", "0" },
             { "page-break-inside", "auto" },
             { "text-align", "" },
-            { "text-decoration", "" },
+            { "text-decoration-line", "" },
             { "text-indent", "0" },
             { "top", "auto" },
             { "position", "static" },

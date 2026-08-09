@@ -47,9 +47,9 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
             "border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius",
             "margin-bottom", "margin-left", "margin-right", "margin-top",
             "padding-bottom", "padding-left", "padding-right", "padding-top",
-            "page-break-inside", "left", "top", "width", "max-width", "height",
+            "page-break-inside", "left", "top", "width", "max-width", "height", "min-height", "max-height",
             "background-color", "background-image", "background-position", "background-repeat",
-            "content", "color", "display", "direction", "empty-cells", "float", "position",
+            "content", "color", "display", "direction", "empty-cells", "float", "clear", "box-sizing", "position",
             "line-height", "vertical-align", "text-indent", "text-align", "text-decoration-line",
             "white-space", "word-break", "visibility", "word-spacing",
             "font-family", "font-size", "font-style", "font-variant", "font-weight",
@@ -159,6 +159,10 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     return cssBox.MaxWidth;
                 case "height":
                     return cssBox.Height;
+                case "min-height":
+                    return cssBox.MinHeight;
+                case "max-height":
+                    return cssBox.MaxHeight;
                 case "background-color":
                     return cssBox.BackgroundColor;
                 case "background-image":
@@ -179,6 +183,10 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     return cssBox.EmptyCells;
                 case "float":
                     return cssBox.Float;
+                case "clear":
+                    return cssBox.Clear;
+                case "box-sizing":
+                    return cssBox.BoxSizing;
                 case "position":
                     return cssBox.Position;
                 case "line-height":
@@ -333,6 +341,12 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                 case "height":
                     cssBox.Height = value;
                     break;
+                case "min-height":
+                    cssBox.MinHeight = value;
+                    break;
+                case "max-height":
+                    cssBox.MaxHeight = value;
+                    break;
                 case "background-color":
                     cssBox.BackgroundColor = value;
                     break;
@@ -362,6 +376,12 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     break;
                 case "float":
                     cssBox.Float = value;
+                    break;
+                case "clear":
+                    cssBox.Clear = value;
+                    break;
+                case "box-sizing":
+                    cssBox.BoxSizing = value;
                     break;
                 case "position":
                     cssBox.Position = value;

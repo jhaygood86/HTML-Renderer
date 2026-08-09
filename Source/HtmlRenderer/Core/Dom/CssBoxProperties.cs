@@ -67,7 +67,12 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         private string _fontVariant = "normal";
         private string _fontWeight = "normal";
         private string _float = "none";
+        private string _clear = "none";
+        private string _boxSizing = CssConstants.ContentBox;
         private string _height = "auto";
+        private string _minHeight = "0";
+        private string _maxHeight = CssConstants.None;
+        private bool _isHeightCalculated;
         private string _marginBottom = "0";
         private string _marginLeft = "0";
         private string _marginRight = "0";
@@ -494,6 +499,34 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             set { _height = value; }
         }
 
+        public string MinHeight
+        {
+            get { return _minHeight; }
+            set { _minHeight = value; }
+        }
+
+        public string MaxHeight
+        {
+            get { return _maxHeight; }
+            set { _maxHeight = value; }
+        }
+
+        /// <summary>
+        /// Whether this box's own height is "specified explicitly" per CSS 2.1 10.5: a definite
+        /// (non-auto) length, or a percentage against a containing block that is itself
+        /// height-calculated - or this box is the root/initial containing block (whose used height is
+        /// the page height regardless of its own computed `height`). Drives whether a DESCENDANT's
+        /// percentage height/min-height/max-height resolves against this box; computed by
+        /// <see cref="CssBox.ApplyHeight"/> once this box's own height is finalized, not a pure
+        /// computed getter (a descendant's own ApplyHeight needs to read it before this box's parent
+        /// has necessarily finished, so it can't be derived on demand from current state alone).
+        /// </summary>
+        public bool IsHeightCalculated
+        {
+            get { return _isHeightCalculated; }
+            set { _isHeightCalculated = value; }
+        }
+
         public string BackgroundColor
         {
             get { return _backgroundColor; }
@@ -560,6 +593,18 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         {
             get { return _float; }
             set { _float = value; }
+        }
+
+        public string Clear
+        {
+            get { return _clear; }
+            set { _clear = value; }
+        }
+
+        public string BoxSizing
+        {
+            get { return _boxSizing; }
+            set { _boxSizing = value; }
         }
 
         public string Position
@@ -758,6 +803,35 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         }
 
         /// <summary>
+        /// The padding+border this box's own explicit <see cref="Width"/>/<see cref="Height"/> value needs
+        /// added on top of it to reach the border-box measure - zero for <c>box-sizing: border-box</c>
+        /// (where the declared value already IS the border-box measure), padding+border for the default
+        /// <c>content-box</c> (where the declared value is the content measure alone).
+        /// </summary>
+        public double ActualBoxSizeIncludedWidth
+        {
+            get
+            {
+                return BoxSizing == CssConstants.BorderBox
+                    ? 0
+                    : ActualPaddingLeft + ActualPaddingRight + ActualBorderLeftWidth + ActualBorderRightWidth;
+            }
+        }
+
+        /// <summary>
+        /// See <see cref="ActualBoxSizeIncludedWidth"/>, the vertical counterpart.
+        /// </summary>
+        public double ActualBoxSizeIncludedHeight
+        {
+            get
+            {
+                return BoxSizing == CssConstants.BorderBox
+                    ? 0
+                    : ActualPaddingTop + ActualPaddingBottom + ActualBorderTopWidth + ActualBorderBottomWidth;
+            }
+        }
+
+        /// <summary>
         /// Gets the right of the box. When setting, it will affect only the width of the box.
         /// </summary>
         public double ActualRight
@@ -825,7 +899,16 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             {
                 if (double.IsNaN(_actualHeight))
                 {
-                    _actualHeight = CssValueParser.ParseLength(Height, Size.Height, this);
+                    var parsedHeight = CssValueParser.ParseLength(Height, Size.Height, this);
+
+                    // An explicit (non-auto) Height is a content-box measure under the default box-sizing
+                    // (CSS Box Sizing 3) - add this box's own padding+border to reach the border-box measure
+                    // this getter's one caller (CssBox.PerformLayoutImp's ActualBottom expansion) expects.
+                    // ActualBoxSizeIncludedHeight is 0 for box-sizing:border-box, where parsedHeight already
+                    // IS the border-box measure.
+                    _actualHeight = Height != null && Height != CssConstants.Auto && !string.IsNullOrEmpty(Height)
+                        ? parsedHeight + ActualBoxSizeIncludedHeight
+                        : parsedHeight;
                 }
                 return _actualHeight;
             }
@@ -840,7 +923,15 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             {
                 if (double.IsNaN(_actualWidth))
                 {
-                    _actualWidth = CssValueParser.ParseLength(Width, Size.Width, this);
+                    // A percentage Width was already resolved to an absolute pixel value (against its
+                    // containing block, box-sizing-included) by CssBox.PerformLayoutImp's block-width pass
+                    // and baked into Size.Width - re-parsing it here against Size.Width (already-resolved
+                    // pixels, not a percentage base) would resolve the percentage against itself, squaring
+                    // it. A fixed-unit Width (em/px/pt) is unaffected either way, since ParseLength ignores
+                    // the percentage base for those units - only percentage Width ever hits this path.
+                    _actualWidth = Width != null && Width.EndsWith("%")
+                        ? Size.Width
+                        : CssValueParser.ParseLength(Width, Size.Width, this);
                 }
                 return _actualWidth;
             }
@@ -1644,7 +1735,11 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                     _borderBottomLeftRadius = p._borderBottomLeftRadius;
                     _display = p._display;
                     _float = p._float;
+                    _clear = p._clear;
+                    _boxSizing = p._boxSizing;
                     _height = p._height;
+                    _minHeight = p._minHeight;
+                    _maxHeight = p._maxHeight;
                     _marginBottom = p._marginBottom;
                     _marginLeft = p._marginLeft;
                     _marginRight = p._marginRight;

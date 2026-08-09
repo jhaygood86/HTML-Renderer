@@ -168,6 +168,40 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         }
 
         /// <summary>
+        /// Applies float positioning (float: left/right) and clearance (clear) to a box that has already
+        /// had its static in-flow position committed by the caller (<see cref="CssBox.PerformLayoutImp"/>) -
+        /// overwrites <see cref="CssBox.Location"/> using that static position as input. No-op if the box
+        /// is neither floated nor has clear set. Ported from PeachPDF.
+        /// </summary>
+        /// <param name="box">the box to float/clear - its Location.Y must already hold its static position</param>
+        public static void FloatBox(CssBox box)
+        {
+            if (box.Float == CssConstants.None && box.Clear == CssConstants.None)
+                return;
+
+            var containingBox = box.ContainingBlock;
+            var limitRight = containingBox.ClientRight;
+            var startX = containingBox.ClientLeft;
+            var startY = box.Location.Y;
+            var currentBoxIdx = containingBox.Boxes.IndexOf(box);
+
+            switch (box.Float)
+            {
+                case CssConstants.Left:
+                    FloatBoxLeft(box, startX, startY, limitRight);
+                    break;
+                case CssConstants.Right:
+                    FloatBoxRight(box, startX, startY, limitRight);
+                    break;
+            }
+
+            if (box.Clear != CssConstants.None)
+            {
+                ClearBox(box, currentBoxIdx, containingBox);
+            }
+        }
+
+        /// <summary>
         /// Applies special vertical alignment for table-cells
         /// </summary>
         /// <param name="g"></param>
@@ -226,6 +260,148 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         #region Private methods
 
         /// <summary>
+        /// Pushes <paramref name="box"/> down past any floated preceding sibling (at any depth - a float
+        /// nested inside a plain non-floated wrapper still needs clearing against, CSS 2.1 9.5.2) that
+        /// matches <paramref name="box"/>'s <c>clear</c> direction. Only ever changes Y, never X - X is
+        /// left exactly as <see cref="FloatBox"/>/normal static-position assignment already set it.
+        /// </summary>
+        private static void ClearBox(CssBox box, int currentBoxIdx, CssBox containingBox)
+        {
+            var clearance = Math.Max(containingBox.ClientTop, box.Location.Y);
+
+            for (int i = 0; i < currentBoxIdx; i++)
+            {
+                clearance = Math.Max(clearance, GetClearance(containingBox.Boxes[i], box.Clear));
+            }
+
+            box.Location = new RPoint(box.Location.X, clearance);
+        }
+
+        /// <summary>
+        /// Recursively finds the outer (margin) bottom edge of every floated box in <paramref name="sibling"/>'s
+        /// subtree that matches <paramref name="clearDirection"/>, testing <paramref name="sibling"/> itself
+        /// and every descendant at every depth (not just direct children) - so a float directly inside another
+        /// float (e.g. ACID1's <c>dd</c> float:right containing <c>blockquote</c>/<c>h1</c> float:left as direct
+        /// children) is never missed.
+        /// </summary>
+        private static double GetClearance(CssBox sibling, string clearDirection)
+        {
+            double clearance = 0;
+
+            if (sibling.IsFloated &&
+                (clearDirection == CssConstants.Both ||
+                 (clearDirection == CssConstants.Left && sibling.Float == CssConstants.Left) ||
+                 (clearDirection == CssConstants.Right && sibling.Float == CssConstants.Right)))
+            {
+                clearance = sibling.ActualBottom + sibling.ActualMarginBottom;
+            }
+
+            foreach (var child in sibling.Boxes)
+            {
+                clearance = Math.Max(clearance, GetClearance(child, clearDirection));
+            }
+
+            return clearance;
+        }
+
+        private static void FloatBoxLeft(CssBox box, double startX, double startY, double limitRight)
+        {
+            var coordinates = new DomUtils.CssFloatCoordinates
+            {
+                Left = startX + box.ActualMarginLeft,
+                Right = limitRight,
+                Top = startY,
+                MaxBottom = startY,
+                MarginLeft = box.ActualMarginLeft,
+                MarginRight = box.ActualMarginRight,
+                // FloatBox (this method's only caller) runs from PerformLayoutImp's block-width-
+                // resolution branch, after Size.Width is already resolved to this box's border-box
+                // width - use it directly rather than ActualWidth, which re-parses the Width CSS
+                // string against Size.Width as a percentage base (correct for the inline-block callers
+                // it otherwise serves, but not what a border-box reference width means here: for a
+                // fixed-unit Width like "34em" it returns the bare content-only value, ignoring
+                // Size.Width entirely, understating a padded/bordered float's true footprint).
+                ReferenceWidth = box.Size.Width
+            };
+
+            while (true)
+            {
+                var intersectingFloat = DomUtils.GetFirstIntersectingFloatBox(box, coordinates, box.Float);
+                if (intersectingFloat == null)
+                    break;
+
+                switch (intersectingFloat.Float)
+                {
+                    case CssConstants.Left:
+                        coordinates.Left = intersectingFloat.ActualRight + intersectingFloat.ActualMarginRight + box.ActualMarginLeft;
+                        break;
+                    case CssConstants.Right:
+                        coordinates.Right = intersectingFloat.Location.X - intersectingFloat.ActualMarginLeft;
+                        break;
+                }
+
+                if (intersectingFloat.ActualBottom > coordinates.MaxBottom)
+                {
+                    coordinates.MaxBottom = intersectingFloat.ActualBottom;
+                }
+
+                if (coordinates.Left + box.Size.Width > coordinates.Right)
+                {
+                    coordinates.Top = coordinates.MaxBottom + box.ActualMarginTop;
+                    coordinates.Left = startX + box.ActualMarginLeft;
+                }
+            }
+
+            box.Location = new RPoint(coordinates.Left, coordinates.Top);
+        }
+
+        private static void FloatBoxRight(CssBox box, double startX, double startY, double limitRight)
+        {
+            var coordinates = new DomUtils.CssFloatCoordinates
+            {
+                Left = startX,
+                Right = limitRight - box.ActualMarginRight,
+                Top = startY,
+                MaxBottom = startY,
+                MarginLeft = box.ActualMarginLeft,
+                MarginRight = box.ActualMarginRight,
+                // See FloatBoxLeft's matching comment - Size.Width is this box's own already-resolved
+                // border-box width, which is what ReferenceWidth means here.
+                ReferenceWidth = box.Size.Width
+            };
+
+            while (true)
+            {
+                var intersectingFloat = DomUtils.GetFirstIntersectingFloatBox(box, coordinates, box.Float);
+                if (intersectingFloat == null)
+                    break;
+
+                switch (intersectingFloat.Float)
+                {
+                    case CssConstants.Left:
+                        coordinates.Left = intersectingFloat.ActualRight;
+                        break;
+                    case CssConstants.Right:
+                        coordinates.Right = intersectingFloat.Location.X;
+                        break;
+                }
+
+                if (intersectingFloat.ActualBottom > coordinates.MaxBottom)
+                {
+                    coordinates.MaxBottom = intersectingFloat.ActualBottom;
+                }
+
+                if (coordinates.Left > coordinates.FloatRightStartX)
+                {
+                    coordinates.Right = limitRight - box.ActualMarginRight;
+                    coordinates.Top = coordinates.MaxBottom;
+                }
+            }
+
+            box.Location = new RPoint(coordinates.FloatRightStartX, coordinates.Top);
+        }
+
+        /// <summary>
         /// Recursively flows the content of the box using the inline model
         /// </summary>
         /// <param name="g">Device Info</param>
@@ -258,6 +434,12 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
 
                 curx += leftspacing;
 
+                var leadingLeftFloat = DomUtils.GetLastLeftIntersectingFloatBox(box, curx, cury, maxRight, maxbottom);
+                if (leadingLeftFloat != null)
+                {
+                    curx = leadingLeftFloat.ActualRight + leadingLeftFloat.ActualMarginRight + leftspacing;
+                }
+
                 if (b.Words.Count > 0)
                 {
                     bool wrapNoWrapBox = false;
@@ -278,7 +460,14 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                         if (maxbottom - cury < box.ActualLineHeight)
                             maxbottom += box.ActualLineHeight - (maxbottom - cury);
 
-                        if ((b.WhiteSpace != CssConstants.NoWrap && b.WhiteSpace != CssConstants.Pre && curx + word.Width + rightspacing > limitRight
+                        double actualLimitRight = limitRight;
+                        var rightObstructingFloat = DomUtils.GetLastRightIntersectingFloatBox(box, cury);
+                        if (rightObstructingFloat != null)
+                        {
+                            actualLimitRight = rightObstructingFloat.Location.X - rightObstructingFloat.ActualMarginLeft - rightspacing;
+                        }
+
+                        if ((b.WhiteSpace != CssConstants.NoWrap && b.WhiteSpace != CssConstants.Pre && curx + word.Width + rightspacing > actualLimitRight
                              && (b.WhiteSpace != CssConstants.PreWrap || !word.IsSpaces))
                             || word.IsLineBreak || wrapNoWrapBox)
                         {
@@ -291,6 +480,12 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
 
                             cury = maxbottom + linespacing;
 
+                            var wrapLeftFloat = DomUtils.GetLastLeftIntersectingFloatBox(b, curx, cury, maxRight, maxbottom);
+                            if (wrapLeftFloat != null)
+                            {
+                                curx = wrapLeftFloat.ActualRight + wrapLeftFloat.ActualMarginRight + leftspacing;
+                            }
+
                             line = new CssLineBox(blockbox);
 
                             if (word.IsImage || word.Equals(b.FirstWord))
@@ -300,6 +495,12 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                         }
 
                         line.ReportExistanceOf(word);
+
+                        var placementLeftFloat = DomUtils.GetLastLeftIntersectingFloatBox(box, curx, cury, maxRight, maxbottom);
+                        if (placementLeftFloat != null)
+                        {
+                            curx = placementLeftFloat.ActualRight + placementLeftFloat.ActualMarginRight + leftspacing;
+                        }
 
                         word.Left = curx;
                         word.Top = cury;

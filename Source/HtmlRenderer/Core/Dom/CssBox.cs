@@ -189,6 +189,25 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         }
 
         /// <summary>
+        /// Is this box floated (float: left or float: right).
+        /// </summary>
+        public bool IsFloated
+        {
+            get { return Float == CssConstants.Left || Float == CssConstants.Right; }
+        }
+
+        /// <summary>
+        /// True for a box removed from normal flow: floated, or absolutely/fixed positioned. Ported
+        /// from PeachPDF's CssBox.IsOutOfFlow - used to find a container's last IN-FLOW child (e.g.
+        /// <see cref="MarginBottomCollapse"/>), since an out-of-flow box doesn't contribute to a
+        /// non-BFC-establishing container's own auto-height (CSS 2.1 10.6.3/10.6.7).
+        /// </summary>
+        public bool IsOutOfFlow
+        {
+            get { return IsFloated || Position == CssConstants.Absolute || Position == CssConstants.Fixed; }
+        }
+
+        /// <summary>
         /// Is the css box clickable (by default only "a" elements that are actual hyperlinks - i.e.
         /// have an "href" - are clickable; an "a" used only as a named anchor/target has no href and
         /// is not clickable, matching the same "href" gate CSS uses for the :link pseudo-class).
@@ -634,6 +653,90 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         #region Private Methods
 
         /// <summary>
+        /// Computes this box's used height, ported from PeachPDF's CssLayoutEngine.GetBoxHeight -
+        /// scoped to the height features this engine supports (no aspect-ratio, no absolutely-
+        /// positioned top+bottom fill, no per-page height: PeachPDF features this engine never had).
+        /// PeachPDF's Size.Height is content-only, so its GetBoxHeight starts from
+        /// ActualBoxSizingHeight (Size.Height + padding/border) as the auto-height baseline and can
+        /// return null for an indeterminate percentage height, leaving ApplyHeight's Math.Max to
+        /// preserve whatever content-driven value is already there. This engine's Size.Height is
+        /// already the border-box measure (see <see cref="ActualRight"/>), so the equivalent baseline
+        /// is Size.Height itself, and there is no null case to thread through - an indeterminate
+        /// percentage height simply falls back to that same baseline directly.
+        /// </summary>
+        private double GetBoxHeight()
+        {
+            double height = Size.Height;
+
+            if (CssValueParser.IsValidLength(Height) && !(Height.EndsWith("%") && !ContainingBlock.IsHeightCalculated))
+            {
+                height = CssValueParser.ParseLength(Height, ContainingBlock.Size.Height, this) + ActualBoxSizeIncludedHeight;
+            }
+
+            if (CssValueParser.IsValidLength(MinHeight) && (ContainingBlock.IsHeightCalculated || !MinHeight.EndsWith("%")))
+            {
+                var minHeight = CssValueParser.ParseLength(MinHeight, ContainingBlock.Size.Height, this) + ActualBoxSizeIncludedHeight;
+                if (minHeight > height)
+                {
+                    height = minHeight;
+                }
+            }
+
+            return height;
+        }
+
+        /// <summary>
+        /// Applies this box's used height (CSS 2.1 10.5/10.6.3/10.7) to <see cref="CssBoxProperties.ActualBottom"/>,
+        /// and computes whether this box counts as height-calculated for a descendant's percentage
+        /// height resolution. Ported from PeachPDF's CssLayoutEngine.ApplyHeight.
+        /// <para>
+        /// The assignment below is unconditional (not the plain <c>Math.Max(ActualBottom, ...)</c>
+        /// this replaced) - a no-op for auto height, since <see cref="GetBoxHeight"/>'s baseline is
+        /// already ActualBottom's own current value, but a real correction for a definite height,
+        /// able to shrink ActualBottom back down, which Math.Max alone never could. That correction is
+        /// what fixes a real bug this exposed: <see cref="CssLayoutEngine.FlowBox"/>'s own "handle
+        /// height setting" step (for a nested atomic inline-block) pushes a block's own maxBottom out
+        /// to the block's full ActualHeight measured from its content top, and CreateLineBoxes then
+        /// adds that same block's bottom padding/border again on top - inflating ActualBottom by one
+        /// extra padding+border box for any floated or block-level box with both an explicit height
+        /// and non-zero padding/border (e.g. every floated box in the W3C ACID1 test). A definite
+        /// height here authoritatively overwrites that inflated value instead of merely preserving it.
+        /// </para>
+        /// </summary>
+        private void ApplyHeight()
+        {
+            var height = GetBoxHeight();
+            ActualBottom = Location.Y + height;
+
+            var isRootWithPageHeight = ParentBox == null && HtmlContainer != null;
+            var isDefiniteHeight = CssValueParser.IsValidLength(Height) && (ContainingBlock.IsHeightCalculated || !Height.EndsWith("%"));
+            IsHeightCalculated = isRootWithPageHeight || isDefiniteHeight;
+
+            if (CssValueParser.IsValidLength(MaxHeight) && MaxHeight != CssConstants.None
+                && (ContainingBlock.IsHeightCalculated || !MaxHeight.EndsWith("%")))
+            {
+                var maxHeight = CssValueParser.ParseLength(MaxHeight, ContainingBlock.Size.Height, this) + ActualBoxSizeIncludedHeight;
+                var maxBottom = Location.Y + maxHeight;
+
+                if (ActualBottom > maxBottom)
+                {
+                    ActualBottom = maxBottom;
+
+                    if (CssValueParser.IsValidLength(MinHeight) && (ContainingBlock.IsHeightCalculated || !MinHeight.EndsWith("%")))
+                    {
+                        var minHeight = CssValueParser.ParseLength(MinHeight, ContainingBlock.Size.Height, this) + ActualBoxSizeIncludedHeight;
+                        var minBottom = Location.Y + minHeight;
+
+                        if (ActualBottom < minBottom)
+                        {
+                            ActualBottom = minBottom;
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Measures the bounds of box and children, recursively.<br/>
         /// Performs layout of the DOM structure creating lines by set bounds restrictions.<br/>
         /// </summary>
@@ -651,19 +754,44 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                 // Because their width and height are set by CssTable
                 if (Display != CssConstants.TableCell && Display != CssConstants.Table)
                 {
-                    double width = ContainingBlock.Size.Width
+                    double availableWidth = ContainingBlock.Size.Width
                                    - ContainingBlock.ActualPaddingLeft - ContainingBlock.ActualPaddingRight
                                    - ContainingBlock.ActualBorderLeftWidth - ContainingBlock.ActualBorderRightWidth;
+                    double width = availableWidth;
+                    bool explicitWidth = Width != CssConstants.Auto && !string.IsNullOrEmpty(Width);
 
-                    if (Width != CssConstants.Auto && !string.IsNullOrEmpty(Width))
+                    if (explicitWidth)
                     {
-                        width = CssValueParser.ParseLength(Width, width, this);
+                        // CSS 2.1 10.2: a percentage/length `width` resolves against the containing block's
+                        // content width. Per CSS Box Sizing 3, that resolved value is this box's CONTENT
+                        // width under the default `box-sizing: content-box` - its border-box width (what
+                        // Size.Width holds throughout this engine) additionally includes this box's own
+                        // padding+border (ActualBoxSizeIncludedWidth is 0 for `box-sizing: border-box`,
+                        // where the resolved value already IS the border-box width).
+                        width = CssValueParser.ParseLength(Width, availableWidth, this) + ActualBoxSizeIncludedWidth;
+                    }
+                    else if (IsFloated)
+                    {
+                        // CSS 2.1 10.3.5: a floated box with width:auto shrinks to fit its content
+                        // instead of taking the full containing-block width like an ordinary block.
+                        // GetMinMaxWidth already returns border-box-inclusive bounds (its own padding/
+                        // border baked in), so no box-sizing adjustment is needed here.
+                        double minWidth, maxWidth;
+                        GetMinMaxWidth(out minWidth, out maxWidth);
+                        width = Math.Min(Math.Max(minWidth, width), maxWidth);
                     }
 
                     Size = new RSize(width, Size.Height);
 
-                    // must be separate because the margin can be calculated by percentage of the width
-                    Size = new RSize(width - ActualMarginLeft - ActualMarginRight, Size.Height);
+                    if (!explicitWidth && !IsFloated)
+                    {
+                        // CSS 2.1 10.3.3: only a plain (non-floated) width:auto block absorbs its own
+                        // margin into the available fill width to become its used (border-box) width - an
+                        // explicit width, or a floated shrink-to-fit width, is the used width as-is; margin
+                        // is separate space outside the border box (already accounted for via this box's
+                        // Location.X), not a further reduction of Size.Width on top of that.
+                        Size = new RSize(width - ActualMarginLeft - ActualMarginRight, Size.Height);
+                    }
                 }
 
                 if (Display != CssConstants.TableCell)
@@ -683,6 +811,10 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                         top = (prevSibling == null && ParentBox != null ? ParentBox.ClientTop : ParentBox == null ? Location.Y : 0) + MarginTopCollapse(prevSibling) + (prevSibling != null ? prevSibling.ActualBottom + prevSibling.ActualBorderBottomWidth : 0);
                         Location = new RPoint(left, top);
                         ActualBottom = top;
+
+                        // static position committed above; float/clear now overwrite Location using that
+                        // static position as input. No-op for boxes that are neither floated nor clearing.
+                        CssLayoutEngine.FloatBox(this);
                     }
                 }
 
@@ -706,7 +838,19 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                             childBox.PerformLayout(g);
                         }
                         ActualRight = CalculateActualRight();
-                        ActualBottom = MarginBottomCollapse();
+
+                        // CSS 2.1 10.6.3/10.6.7: a plain (non-BFC-establishing) box's own auto-height
+                        // doesn't contribute from out-of-flow (floated/absolutely-positioned) children
+                        // at all - if EVERY child is out-of-flow (e.g. a <ul> whose only children are
+                        // floated <li>s), there is no in-flow content to measure, so ActualBottom is
+                        // left exactly as the static-position commit above already set it (its own
+                        // top, i.e. zero content height) rather than being pulled down to match a
+                        // floated child's position. Ported from PeachPDF's CssBox.PerformLayoutImp
+                        // (`if (Boxes.Any(b => !b.IsOutOfFlow)) { ActualBottom = MarginBottomCollapse(); }`).
+                        if (Boxes.Exists(b => !b.IsOutOfFlow))
+                        {
+                            ActualBottom = MarginBottomCollapse();
+                        }
                     }
                 }
             }
@@ -720,7 +864,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                     ActualBottom = prevSibling.ActualBottom;
                 }
             }
-            ActualBottom = Math.Max(ActualBottom, Location.Y + ActualHeight);
+            ApplyHeight();
 
             CreateListItemBox(g);
 
@@ -1193,13 +1337,20 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         /// <returns>Resulting bottom margin</returns>
         private double MarginBottomCollapse()
         {
+            // Only called when at least one in-flow child exists (see the caller's IsOutOfFlow gate),
+            // so this is guaranteed to find one - an out-of-flow (floated/absolutely-positioned) child
+            // doesn't contribute to this box's own auto-height (CSS 2.1 10.6.3/10.6.7) and must not be
+            // used as "the last child" here, matching PeachPDF's own MarginBottomCollapse
+            // (`Boxes.Last(b => !b.IsOutOfFlow)`).
+            var lastInFlowBox = _boxes.FindLast(b => !b.IsOutOfFlow);
+
             double margin = 0;
             if (ParentBox != null && ParentBox.Boxes.IndexOf(this) == ParentBox.Boxes.Count - 1 && _parentBox.ActualMarginBottom < 0.1)
             {
-                var lastChildBottomMargin = _boxes[_boxes.Count - 1].ActualMarginBottom;
+                var lastChildBottomMargin = lastInFlowBox.ActualMarginBottom;
                 margin = Height == "auto" ? Math.Max(ActualMarginBottom, lastChildBottomMargin) : lastChildBottomMargin;
             }
-            return Math.Max(ActualBottom, _boxes[_boxes.Count - 1].ActualBottom + margin + ActualPaddingBottom + ActualBorderBottomWidth);
+            return Math.Max(ActualBottom, lastInFlowBox.ActualBottom + margin + ActualPaddingBottom + ActualBorderBottomWidth);
         }
 
         /// <summary>
@@ -1468,7 +1619,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
 
             // text-decoration-line may list several space-separated line keywords (e.g. "underline
             // overline") - draw each one present rather than only the first/only value.
-            foreach (var line in TextDecoration.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            foreach (var line in TextDecoration.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
             {
                 double y;
                 if (line == CssConstants.Underline)

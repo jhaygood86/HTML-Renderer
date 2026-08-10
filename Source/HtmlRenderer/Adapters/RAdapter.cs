@@ -114,6 +114,16 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
         }
 
         /// <summary>
+        /// Test-only seam: when set, an adapter that would otherwise report a live system theme (WinForms/
+        /// WPF) returns this value from <see cref="SystemColorScheme"/> instead of querying the OS. Image-
+        /// regression tests render against a fixed baseline and must not depend on the host machine's own
+        /// theme setting - without this, a CI runner whose theme differs from whatever machine captured the
+        /// baseline fails a <c>prefers-color-scheme</c> sample for reasons unrelated to any real rendering
+        /// regression. Production code must never set this.
+        /// </summary>
+        internal static RColorScheme? SystemColorSchemeOverride { get; set; }
+
+        /// <summary>
         /// Raised when <see cref="SystemColorScheme"/> has changed, so anything rendered against it can
         /// re-evaluate its <c>prefers-color-scheme</c> rules and repaint. Never raised by an adapter
         /// whose scheme is fixed.

@@ -140,6 +140,8 @@ namespace TheArtOfDev.HtmlRenderer.WPF.Adapters
         {
             get
             {
+                if (SystemColorSchemeOverride.HasValue)
+                    return SystemColorSchemeOverride.Value;
                 if (!_colorScheme.HasValue)
                     _colorScheme = WindowsTheme.GetAppsColorScheme();
                 return _colorScheme.Value;

@@ -13,12 +13,14 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.IO;
 using System.Net.Http;
 using System.Windows.Forms;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Core.Network;
+using TheArtOfDev.HtmlRenderer.Core.Utils;
 using TheArtOfDev.HtmlRenderer.WinForms.Utilities;
 
 namespace TheArtOfDev.HtmlRenderer.WinForms.Adapters
@@ -30,15 +32,39 @@ namespace TheArtOfDev.HtmlRenderer.WinForms.Adapters
     {
         #region Fields and Consts
 
+        // One HttpClient shared for the adapter's (process) lifetime, not one per request - `new
+        // HttpClient()` per call is a well-documented anti-pattern that exhausts sockets under load and
+        // never observes DNS changes.
+        //
+        // Declared BEFORE _instance deliberately: C# runs static field initializers in textual
+        // declaration order, and _instance's own initializer (`new WinFormsAdapter()`) runs the instance
+        // constructor immediately, which reads _sharedHttpClient on its very first line. If this field
+        // were declared after _instance, that read would observe _sharedHttpClient's still-default value
+        // (null - its own initializer hasn't run yet) and permanently capture a null HttpClient into
+        // NetworkLoader, since HttpClientNetworkLoader takes it as a constructor parameter, not a live
+        // reference to this field. (Confirmed by a real crash with this exact ordering.)
+        private static readonly HttpClient _sharedHttpClient = new HttpClient();
+
         /// <summary>
         /// Singleton instance of global adapter.
         /// </summary>
         private static readonly WinFormsAdapter _instance = new WinFormsAdapter();
 
-        // One HttpClient shared for the adapter's (process) lifetime, not one per request - `new
-        // HttpClient()` per call is a well-documented anti-pattern that exhausts sockets under load and
-        // never observes DNS changes.
-        private static readonly HttpClient _sharedHttpClient = new HttpClient();
+        // Adapter-level PrivateFontCollection for @font-face-loaded faces - one collection shared for the
+        // adapter's (process) lifetime, growing by one family per LoadFontFaceFontInt call.
+        private readonly PrivateFontCollection _fontFaceCollection = new PrivateFontCollection();
+
+        // Backs LoadFontFaceFontInt's temp-file registration (see its own doc comment for why a temp file
+        // is used instead of PrivateFontCollection.AddMemoryFont) - one directory per process, cleaned up
+        // by the OS's normal temp-file housekeeping, not by this process.
+        private static readonly string _fontFaceTempDirectory = CreateFontFaceTempDirectory();
+
+        private static string CreateFontFaceTempDirectory()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "HtmlRenderer.FontFace." + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
 
         #endregion
 
@@ -180,6 +206,67 @@ namespace TheArtOfDev.HtmlRenderer.WinForms.Adapters
         {
             var fontStyle = (FontStyle)((int)style);
             return new FontAdapter(new Font(((FontFamilyAdapter)family).FontFamily, (float)size, fontStyle));
+        }
+
+        /// <summary>
+        /// Loads one <c>@font-face</c> face's bytes into the adapter's <see cref="PrivateFontCollection"/>
+        /// via <see cref="PrivateFontCollection.AddFontFile"/> - through a temp file, matching this
+        /// adapter's own pre-existing <c>DemoForm.LoadCustomFonts</c> pattern (that path is untouched,
+        /// this is a new, separate mechanism specific to <c>@font-face</c>).
+        /// </summary>
+        /// <remarks>
+        /// Deliberately NOT <see cref="PrivateFontCollection.AddMemoryFont"/>, despite it needing no temp
+        /// file: empirically (a throwaway repro project registering a dozen distinct families into one
+        /// <see cref="PrivateFontCollection"/>), <c>AddMemoryFont</c> is unreliable on this target
+        /// framework - <see cref="PrivateFontCollection.Families"/> permanently fails to reflect several of
+        /// the added families (not a timing race: polling for up to 300ms after the call never finds them
+        /// either), while the identical sequence of files through <c>AddFontFile</c> succeeds 100% of the
+        /// time across repeated runs. This is a known-flaky area of GDI+'s <c>AddMemoryFont</c> P/Invoke
+        /// path, not a bug in this port. The temp file is deliberately never deleted: GDI+ keeps it
+        /// memory-mapped for as long as this process-lifetime singleton's <see cref="PrivateFontCollection"/>
+        /// references it, and the OS's own temp-directory housekeeping reclaims it afterward - the same
+        /// "small, bounded, process-lifetime" rationale the removed <c>AddMemoryFont</c>/<c>AllocHGlobal</c>
+        /// approach relied on.
+        /// <para>
+        /// The returned <see cref="FontFamilyAdapter"/> is found by sniffing the font's own internal
+        /// family name via <see cref="TtfFontDescription"/> and matching it against
+        /// <see cref="PrivateFontCollection.Families"/> - not by comparing <c>Families.Length</c> before
+        /// and after, nor by taking the array's last entry. Two bugs made that approach unreliable: (1)
+        /// <c>Families</c> groups every face by family name (the whole point of
+        /// <see cref="PrivateFontCollection"/> - it lets <see cref="Font"/> pick the right face via
+        /// <see cref="FontStyle"/> automatically), so registering a second face of an *already-registered*
+        /// family (e.g. this face set's own Bold after its Regular) never changes the count at all; and
+        /// (2) even when the count does change, <c>Families</c> is returned in a GDI-defined (effectively
+        /// alphabetical) order, not insertion order, so "the last entry" is often a completely unrelated,
+        /// alphabetically-later family, not the one just added.
+        /// </para>
+        /// </remarks>
+        protected override RFontFamily LoadFontFaceFontInt(byte[] fontBytes, string filePath)
+        {
+            string familyName;
+            using (var stream = new MemoryStream(fontBytes))
+            {
+                familyName = TtfFontDescription.LoadDescription(stream).FontFamilyInvariantCulture;
+            }
+
+            if (string.IsNullOrEmpty(familyName))
+            {
+                return null;
+            }
+
+            var tempFilePath = Path.Combine(_fontFaceTempDirectory, Guid.NewGuid().ToString("N") + ".ttf");
+            File.WriteAllBytes(tempFilePath, fontBytes);
+            _fontFaceCollection.AddFontFile(tempFilePath);
+
+            foreach (var family in _fontFaceCollection.Families)
+            {
+                if (string.Equals(family.Name, familyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return new FontFamilyAdapter(family);
+                }
+            }
+
+            return null;
         }
 
         protected override object GetClipboardDataObjectInt(string html, string plainText)

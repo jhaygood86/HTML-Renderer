@@ -1708,9 +1708,29 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
             }
         }
 
-        protected override RFont GetCachedFont(string fontFamily, double fsize, RFontStyle st)
+        protected override RFont GetCachedFont(string fontFamily, double fsize, RFontStyle st, int weight, int stretch, int? codepoint)
         {
-            return HtmlContainer.Adapter.GetFont(fontFamily, fsize, st);
+            return HtmlContainer.Adapter.GetFont(fontFamily, fsize, st, weight, stretch, codepoint);
+        }
+
+        /// <summary>See <see cref="CssBoxProperties.GetFirstNonWhitespaceCodepoint"/>.</summary>
+        protected override int? GetFirstNonWhitespaceCodepoint()
+        {
+            if (string.IsNullOrEmpty(_text))
+                return null;
+
+            for (var i = 0; i < _text.Length; i++)
+            {
+                if (char.IsWhiteSpace(_text[i]))
+                    continue;
+
+                if (char.IsHighSurrogate(_text[i]) && i + 1 < _text.Length && char.IsLowSurrogate(_text[i + 1]))
+                    return char.ConvertToUtf32(_text[i], _text[i + 1]);
+
+                return _text[i];
+            }
+
+            return null;
         }
 
         protected override RColor GetActualColor(string colorStr)

@@ -13,6 +13,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Reflection;
 using System.Windows;
@@ -33,6 +34,20 @@ namespace TheArtOfDev.HtmlRenderer.WPF.Adapters
     {
         #region Fields and Consts
 
+        // One HttpClient shared for the adapter's (process) lifetime, not one per request - `new
+        // HttpClient()` per call is a well-documented anti-pattern that exhausts sockets under load and
+        // never observes DNS changes.
+        //
+        // Declared BEFORE _instance deliberately: C# runs static field initializers in textual
+        // declaration order, and _instance's own initializer (`new WpfAdapter()`) runs the instance
+        // constructor immediately, which reads _sharedHttpClient on its very first line. If this field
+        // were declared after _instance, that read would observe _sharedHttpClient's still-default value
+        // (null - its own initializer hasn't run yet) and permanently capture a null HttpClient into
+        // NetworkLoader, since HttpClientNetworkLoader takes it as a constructor parameter, not a live
+        // reference to this field. (Confirmed by a real crash with this exact ordering, in the sibling
+        // WinFormsAdapter.)
+        private static readonly HttpClient _sharedHttpClient = new HttpClient();
+
         /// <summary>
         /// Singleton instance of global adapter.
         /// </summary>
@@ -43,10 +58,18 @@ namespace TheArtOfDev.HtmlRenderer.WPF.Adapters
         /// </summary>
         private static readonly List<string> ValidColorNamesLc;
 
-        // One HttpClient shared for the adapter's (process) lifetime, not one per request - `new
-        // HttpClient()` per call is a well-documented anti-pattern that exhausts sockets under load and
-        // never observes DNS changes.
-        private static readonly HttpClient _sharedHttpClient = new HttpClient();
+        // Backs LoadFontFaceFontInt's temp-file registration (see its own doc comment for why a real file
+        // is necessary - WPF's font-loading APIs are documented as file-URI-only, with no supported
+        // memory-only path) - one directory per process, cleaned up by the OS's normal temp-file
+        // housekeeping, not by this process.
+        private static readonly string _fontFaceTempDirectory = CreateFontFaceTempDirectory();
+
+        private static string CreateFontFaceTempDirectory()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "HtmlRenderer.FontFace." + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
 
         #endregion
 
@@ -190,6 +213,47 @@ namespace TheArtOfDev.HtmlRenderer.WPF.Adapters
         protected override RFont CreateFontInt(RFontFamily family, double size, RFontStyle style)
         {
             return new FontAdapter(new Typeface(((FontFamilyAdapter)family).FontFamily, GetFontStyle(style), GetFontWidth(style), FontStretches.Normal), size);
+        }
+
+        /// <summary>
+        /// Loads one <c>@font-face</c> face's bytes as a WPF <see cref="System.Windows.Media.FontFamily"/>
+        /// via a temp file and <see cref="Fonts.GetFontFamilies(Uri)"/> - WPF's own documented way to load
+        /// a font from an arbitrary location.
+        /// </summary>
+        /// <remarks>
+        /// Two earlier approaches were tried and rejected first: the Win32 <c>AddFontMemResourceEx</c> API
+        /// registers with GDI, but WPF's text stack (DirectWrite-based) never consults GDI's per-process
+        /// font table, so registered faces were silently invisible to WPF. A fully in-memory
+        /// <see cref="System.Net.WebRequest"/>-scheme trick (serving the bytes from a
+        /// <see cref="MemoryStream"/> for a synthetic URI, the same mechanism that historically let WPF/XBAP
+        /// apps reference fonts over plain <c>http://</c>) was also tried and confirmed NOT to work: WPF's
+        /// own source documents <c>Fonts.GetFontFamilies</c>'s location parameter as "must be an absolute
+        /// file URI or path" - empirically, both the eager folder-scan API and the lazy
+        /// <c>new FontFamily(baseUri, "./file#Name")</c> reference came back empty against the synthetic
+        /// scheme even though the handler correctly served the bytes. There is no supported WPF API for
+        /// loading a font from memory alone, so - like WinForms' own <c>PrivateFontCollection.AddFontFile</c>
+        /// path, for its own different reason (GDI+'s <c>AddMemoryFont</c> being unreliable, not a
+        /// fundamental API gap) - this writes to a real, never-deleted temp file.
+        /// </remarks>
+        /// <remarks>
+        /// Each face gets its OWN, never-reused temp subdirectory - not one shared directory for every
+        /// face. WPF's font-family folder enumeration caches its scan per directory and does not notice
+        /// files added to that directory after the first scan (confirmed empirically: with a single shared
+        /// directory, every face after the first one silently resolved back to the first face's glyphs,
+        /// because <see cref="Fonts.GetFontFamilies(Uri)"/>'s first call had already cached "what's in this
+        /// folder" before the later faces' files existed). A fresh, single-file directory per face sidesteps
+        /// that cache entirely.
+        /// </remarks>
+        protected override RFontFamily LoadFontFaceFontInt(byte[] fontBytes, string filePath)
+        {
+            var faceDirectory = Path.Combine(_fontFaceTempDirectory, Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(faceDirectory);
+            var tempFilePath = Path.Combine(faceDirectory, "face.ttf");
+            File.WriteAllBytes(tempFilePath, fontBytes);
+
+            var family = Fonts.GetFontFamilies(new Uri(tempFilePath)).FirstOrDefault();
+
+            return family != null ? new FontFamilyAdapter(family) : null;
         }
 
         protected override object GetClipboardDataObjectInt(string html, string plainText)

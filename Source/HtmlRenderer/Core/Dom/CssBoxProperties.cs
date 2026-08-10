@@ -66,6 +66,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         private string _fontStyle = "normal";
         private string _fontVariant = "normal";
         private string _fontWeight = "normal";
+        private string _fontStretch = "normal";
         private string _float = "none";
         private string _clear = "none";
         private string _boxSizing = CssConstants.ContentBox;
@@ -166,6 +167,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         private RColor _actualBorderRightColor = RColor.Empty;
         private RColor _actualBackgroundColor = RColor.Empty;
         private RFont _actualFont;
+        private int? _actualFontWeight;
 
         #endregion
 
@@ -723,6 +725,12 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         {
             get { return _fontWeight; }
             set { _fontWeight = value; }
+        }
+
+        public string FontStretch
+        {
+            get { return _fontStretch; }
+            set { _fontStretch = value; }
         }
 
         public string ListStyle
@@ -1439,6 +1447,35 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         }
 
         /// <summary>
+        /// Gets the box's own resolved CSS Fonts Level 4 numeric <c>font-weight</c> (1-1000) - cached and
+        /// computed lazily like <see cref="ActualFont"/>, since <c>bolder</c>/<c>lighter</c> resolve
+        /// relative to the parent's own resolved weight (see <see cref="CssFontWeightResolver"/>).
+        /// </summary>
+        internal int ActualFontWeight
+        {
+            get
+            {
+                if (_actualFontWeight == null)
+                {
+                    var parentWeight = GetParent() != null ? GetParent().ActualFontWeight : CssFontWeightResolver.Normal;
+                    _actualFontWeight = CssFontWeightResolver.Resolve(FontWeight, parentWeight);
+                }
+                return _actualFontWeight.Value;
+            }
+        }
+
+        /// <summary>
+        /// The codepoint of this box's own first non-whitespace character, for <c>unicode-range</c> face
+        /// disambiguation (see <see cref="ActualFont"/>) - null when this box has no text of its own (e.g.
+        /// a container box whose text lives on its children) or only whitespace. <see cref="CssBoxProperties"/>
+        /// itself holds no text (that's <see cref="CssBox.Text"/>), hence the hook.
+        /// </summary>
+        protected virtual int? GetFirstNonWhitespaceCodepoint()
+        {
+            return null;
+        }
+
+        /// <summary>
         /// Gets the font that should be actually used to paint the text of the box
         /// </summary>
         public RFont ActualFont
@@ -1463,10 +1500,13 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                         st |= RFontStyle.Italic;
                     }
 
-                    if (FontWeight != CssConstants.Normal && FontWeight != CssConstants.Lighter && !string.IsNullOrEmpty(FontWeight) && FontWeight != CssConstants.Inherit)
+                    var weight = ActualFontWeight;
+                    if (weight >= 600)
                     {
                         st |= RFontStyle.Bold;
                     }
+
+                    var stretch = FontStretchResolver.Resolve(FontStretch);
 
                     double fsize;
                     double parentSize = CssConstants.FontSize;
@@ -1513,13 +1553,22 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                         fsize = CssConstants.FontSize;
                     }
 
-                    _actualFont = GetCachedFont(FontFamily, fsize, st);
+                    var codepoint = GetFirstNonWhitespaceCodepoint();
+                    _actualFont = GetCachedFont(FontFamily, fsize, st, weight, stretch, codepoint);
+                    if (_actualFont == null)
+                    {
+                        // A codepoint-scoped miss (the family has @font-face faces registered, but none
+                        // of them cover this box's first character) - fall back to the default font family
+                        // rather than propagate null, matching the pre-existing "nothing matched" behavior
+                        // for any other unresolvable font-family value.
+                        _actualFont = GetCachedFont(CssConstants.DefaultFont, fsize, st, weight, stretch, null);
+                    }
                 }
                 return _actualFont;
             }
         }
 
-        protected abstract RFont GetCachedFont(string fontFamily, double fsize, RFontStyle st);
+        protected abstract RFont GetCachedFont(string fontFamily, double fsize, RFontStyle st, int weight, int stretch, int? codepoint);
 
         /// <summary>
         /// Gets the line height
@@ -1702,6 +1751,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                 _fontStyle = p._fontStyle;
                 _fontVariant = p._fontVariant;
                 _fontWeight = p._fontWeight;
+                _fontStretch = p._fontStretch;
                 _listStyleImage = p._listStyleImage;
                 _listStylePosition = p._listStylePosition;
                 _listStyleType = p._listStyleType;

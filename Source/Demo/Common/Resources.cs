@@ -38,6 +38,27 @@ namespace TheArtOfDev.HtmlRenderer.Demo.Common
             }
         }
 
+        /// <summary>
+        /// Reads one of the bundled <c>Resources\Fonts\*.ttf</c> demo fonts (Liberation/Noto/whimsical -
+        /// see <c>Resources\Fonts\README.md</c> for the full list and provenance) by file name, e.g.
+        /// <c>GetFontBytes("LiberationSans-Regular.ttf")</c>.
+        /// </summary>
+        public static byte[] GetFontBytes(string fileName)
+        {
+            var stream = GetManifestResourceStream("Fonts." + fileName);
+
+            var buffer = new byte[16 * 1024];
+            using (var ms = new MemoryStream())
+            {
+                int read;
+                while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    ms.Write(buffer, 0, read);
+                }
+                return ms.ToArray();
+            }
+        }
+
         public static Stream Comment16
         {
             get { return GetManifestResourceStream("comment16.gif"); }

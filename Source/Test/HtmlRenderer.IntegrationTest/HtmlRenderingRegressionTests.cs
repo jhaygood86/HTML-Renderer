@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
+using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
 using TheArtOfDev.HtmlRenderer.Demo.Common;
 using TheArtOfDev.HtmlRenderer.WinForms;
@@ -119,6 +120,12 @@ public sealed class HtmlRenderingRegressionTests
             }
 
             SamplesLoader.Init("Regression", typeof(HtmlRender).Assembly.GetName().Version.ToString());
+
+            // Baselines are captured once on some machine and compared everywhere after; a sample driven
+            // by prefers-color-scheme must not depend on whichever machine happens to run the test having
+            // the same Windows theme as that one did. Pin it so every render sees the same reported scheme.
+            RAdapter.SystemColorSchemeOverride = RColorScheme.Light;
+
             _samplesLoaded = true;
         }
     }

@@ -383,10 +383,23 @@ namespace TheArtOfDev.HtmlRenderer.Demo.WPF
         /// <summary>
         /// Set html syntax color text on the RTF html editor.
         /// </summary>
+        /// <remarks>
+        /// Both branches must go through <see cref="HtmlSyntaxHighlighter.Process"/>, not just the
+        /// <c>color</c> one: <c>_htmlEditor</c> (an <c>xctk:RichTextBox</c>) parses its <c>Text</c> setter
+        /// as RTF, and the old <c>!color</c> branch (<c>text.Replace("\n", "\\par ")</c>) produced neither
+        /// a valid RTF header nor escaped literal <c>{</c>/<c>}</c> characters - harmless for markup-only
+        /// samples, but any sample whose <c>&lt;style&gt;</c> block is brace-dense (e.g. a page with many
+        /// <c>@font-face { ... }</c> rules) had its RTF group structure corrupted right at those braces,
+        /// silently truncating/mangling the <c>&lt;style&gt;</c> content that <see cref="GetHtmlEditorText"/>
+        /// later reads back out - which is what fed a mangled stylesheet into PDF export. Using the same
+        /// uniform (uncolored) color for every element still produces valid, correctly-escaped RTF.
+        /// </remarks>
         private void SetColoredText(string text, bool color)
         {
             var selectionStart = _htmlEditor.CaretPosition;
-            _htmlEditor.Text = color ? HtmlSyntaxHighlighter.Process(text) : text.Replace("\n", "\\par ");
+            _htmlEditor.Text = color
+                ? HtmlSyntaxHighlighter.Process(text)
+                : HtmlSyntaxHighlighter.Process(text, System.Drawing.Color.Black, System.Drawing.Color.Black, System.Drawing.Color.Black, System.Drawing.Color.Black, System.Drawing.Color.Black, System.Drawing.Color.Black);
             _htmlEditor.CaretPosition = selectionStart;
         }
 

@@ -12,6 +12,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core.CssEngine;
@@ -1143,7 +1144,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
         {
             foreach (var stylesheet in cssData.Stylesheets)
             {
-                foreach (var rule in CssData.FlattenStyleRules(stylesheet.Rules))
+                foreach (var rule in CssData.FlattenRules(stylesheet.Rules).OfType<IStyleRule>())
                 {
                     if (!selectorMatches(rule.Selector)) continue;
                     foreach (var prop in rule.Style)
@@ -1182,7 +1183,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
             sb.AppendLine("<style type=\"text/css\">");
             foreach (var stylesheet in cssData.Stylesheets)
             {
-                foreach (var rule in CssData.FlattenStyleRules(stylesheet.Rules))
+                foreach (var rule in CssData.FlattenRules(stylesheet.Rules).OfType<IStyleRule>())
                 {
                     sb.Append(rule.SelectorText);
                     sb.Append(" { ");

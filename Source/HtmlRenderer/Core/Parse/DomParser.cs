@@ -21,6 +21,7 @@ using TheArtOfDev.HtmlRenderer.Core.CssEngine;
 using TheArtOfDev.HtmlRenderer.Core.Dom;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Handlers;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 using TheArtOfDev.HtmlRenderer.Core.Utils;
 
 namespace TheArtOfDev.HtmlRenderer.Core.Parse
@@ -65,6 +66,8 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
                 root.HtmlContainer = htmlContainer;
 
                 (cssData, _) = await CascadeParseStyles(root, htmlContainer, cssData, false).ConfigureAwait(false);
+
+                await RegisterFontFaces(cssData, htmlContainer).ConfigureAwait(false);
 
                 // The device @media queries are evaluated against: media type and colour scheme come
                 // from the platform adapter, the viewport from the container's max size (which is the
@@ -139,6 +142,60 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
             }
 
             return (cssData, cssDataChanged);
+        }
+
+        /// <summary>
+        /// Walks every parsed stylesheet's <c>@font-face</c> rules (including ones nested inside
+        /// <c>@media</c>/<c>@supports</c>/<c>@layer</c>/<c>@container</c> - see <see cref="CssData.FlattenRules"/>)
+        /// and registers each one's <c>src</c> candidates with <see cref="Adapters.RAdapter.AddFontFace"/>/
+        /// <see cref="Adapters.RAdapter.AddFontFaceFromLocalFamily"/>, in source order, stopping at the
+        /// first candidate that loads successfully - matching the CSS spec's own "try each src in turn"
+        /// behavior. Called once per <see cref="GenerateCssTree"/>, after stylesheets are collected and
+        /// before the cascade applies, so every box's <see cref="Dom.CssBoxProperties.ActualFont"/> can
+        /// already see the registered faces.
+        /// </summary>
+        private static async Task RegisterFontFaces(CssData cssData, HtmlContainerInt htmlContainer)
+        {
+            var adapter = htmlContainer.Adapter;
+
+            foreach (var stylesheet in cssData.Stylesheets)
+            {
+                var stylesheetBaseUri = stylesheet.BaseUri != null ? new RUri(stylesheet.BaseUri) : null;
+
+                foreach (var rule in CssData.FlattenRules(stylesheet.Rules).OfType<IFontFaceRule>())
+                {
+                    var familyName = CssValueParser.GetFontFaceFamilyName(rule.Family ?? string.Empty);
+                    if (string.IsNullOrWhiteSpace(familyName))
+                        continue;
+
+                    var weight = FontFaceDescriptorResolver.ResolveWeight(rule.Weight) ?? CssFontWeightResolver.Normal;
+                    var isItalic = FontFaceDescriptorResolver.ResolveIsItalic(rule.Style) ?? false;
+                    var stretch = FontFaceDescriptorResolver.ResolveStretch(rule.Stretch) ?? FontStretchResolver.Normal;
+                    var ranges = UnicodeRangeParser.Parse(rule.Range);
+
+                    foreach (var candidate in CssValueParser.GetFontFacePropertyValue(rule.Source ?? string.Empty))
+                    {
+                        bool loaded;
+                        if (!string.IsNullOrEmpty(candidate.Local))
+                        {
+                            var localFamilyName = CssValueParser.GetFontFaceFamilyName(candidate.Local);
+                            loaded = adapter.AddFontFaceFromLocalFamily(familyName, localFamilyName, weight, isItalic, stretch, ranges);
+                        }
+                        else if (!string.IsNullOrEmpty(candidate.Url))
+                        {
+                            var uri = CommonUtils.ResolveAgainstDocumentBase(htmlContainer, candidate.Url, stylesheetBaseUri);
+                            loaded = uri != null && await adapter.AddFontFace(familyName, uri, weight, isItalic, stretch, ranges).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            continue;
+                        }
+
+                        if (loaded)
+                            break;
+                    }
+                }
+            }
         }
 
 
@@ -778,7 +835,7 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
 
             foreach (var stylesheet in cssData.Stylesheets)
             {
-                foreach (var rule in CssData.FlattenStyleRules(stylesheet.Rules))
+                foreach (var rule in CssData.FlattenRules(stylesheet.Rules).OfType<IStyleRule>())
                 {
                     if (!SelectorIsSelectionPseudoElement(rule.Selector)) continue;
 

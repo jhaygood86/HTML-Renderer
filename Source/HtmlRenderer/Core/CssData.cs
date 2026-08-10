@@ -181,33 +181,49 @@ namespace TheArtOfDev.HtmlRenderer.Core
         }
 
         /// <summary>
-        /// Every style rule in a rule list, in document order, descending into <c>@media</c> and
-        /// <c>@layer</c> blocks and into CSS-Nesting child rules. <see cref="Stylesheet.StyleRules"/>
-        /// only sees the top level, so callers that scan for a rule by selector (rather than matching
-        /// against a box) need this or they miss anything nested. <c>@supports</c>/<c>@container</c> are
-        /// deliberately not descended into: their conditions are not evaluated, so their contents do not
-        /// apply.
+        /// Every rule in a rule list, in document order, descending into <c>@layer</c>, <c>@media</c>,
+        /// <c>@container</c>, and (when its condition evaluates true) <c>@supports</c> blocks - matching
+        /// PeachPDF's own <c>CssData.FlattenRules</c> exactly (full descent, not the narrower
+        /// style-rule-only/no-@supports-or-@container predecessor this replaces). Callers that only want
+        /// style rules (the common case - e.g. scanning for a rule by selector rather than matching
+        /// against a box, since <see cref="Stylesheet.StyleRules"/> only sees the top level) filter with
+        /// <c>.OfType&lt;IStyleRule&gt;()</c>, matching PeachPDF's own call-site pattern of filtering the
+        /// general enumerator per use rather than a dedicated pre-filtered helper. CSS-Nesting child rules
+        /// are reached because <see cref="IStyleRule"/> is itself yielded before recursing.
         /// </summary>
-        internal static IEnumerable<IStyleRule> FlattenStyleRules(IEnumerable<IRule> rules)
+        internal static IEnumerable<IRule> FlattenRules(IEnumerable<IRule> rules)
         {
             foreach (var rule in rules)
             {
+                yield return rule;
+
                 if (rule is IStyleRule styleRule)
                 {
-                    yield return styleRule;
-
-                    foreach (var nested in FlattenStyleRules(styleRule.NestedRules))
-                        yield return nested;
-                }
-                else if (rule is IMediaRule mediaRule)
-                {
-                    foreach (var nested in FlattenStyleRules(mediaRule.Rules))
+                    foreach (var nested in FlattenRules(styleRule.NestedRules))
                         yield return nested;
                 }
                 else if (rule is ILayerRule layerRule)
                 {
-                    foreach (var nested in FlattenStyleRules(layerRule.Rules))
+                    foreach (var nested in FlattenRules(layerRule.Rules))
                         yield return nested;
+                }
+                else if (rule is IMediaRule mediaRule)
+                {
+                    foreach (var nested in FlattenRules(mediaRule.Rules))
+                        yield return nested;
+                }
+                else if (rule is IContainerRule containerRule)
+                {
+                    foreach (var nested in FlattenRules(containerRule.Rules))
+                        yield return nested;
+                }
+                else if (rule is ISupportsRule supportsRule)
+                {
+                    if (supportsRule.Condition.Check())
+                    {
+                        foreach (var nested in FlattenRules(supportsRule.Rules))
+                            yield return nested;
+                    }
                 }
             }
         }

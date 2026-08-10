@@ -65,6 +65,22 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         /// </summary>
         private bool _imageLoadingComplete;
 
+        /// <summary>
+        /// the resolved YouTube/Vimeo oEmbed API URI to fetch, set in the constructor but not fetched
+        /// until <see cref="MeasureWordsSize"/> - see its own doc comment for why the fetch can't start
+        /// in the constructor.
+        /// </summary>
+        private RUri _videoApiUri;
+
+        /// <summary>"YouTube" or "Vimeo", for <see cref="FetchVideoApiDataAsync"/>'s error reporting.</summary>
+        private string _videoApiSource;
+
+        /// <summary><see cref="OnDownloadYoutubeApiCompleted"/> or <see cref="OnDownloadVimeoApiCompleted"/>.</summary>
+        private Action<string> _videoApiParseResult;
+
+        /// <summary>Whether <see cref="FetchVideoApiDataAsync"/> has already been kicked off - guards <see cref="MeasureWordsSize"/> so it only starts once.</summary>
+        private bool _videoDataRequested;
+
         #endregion
 
 
@@ -85,12 +101,16 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
                 if (uri.Host.IndexOf("youtube.com", StringComparison.InvariantCultureIgnoreCase) > -1)
                 {
                     _isVideo = true;
-                    LoadYoutubeDataAsync(uri);
+                    _videoApiUri = new RUri(string.Format("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={0}&format=json", uri.Segments[2]));
+                    _videoApiSource = "YouTube";
+                    _videoApiParseResult = OnDownloadYoutubeApiCompleted;
                 }
                 else if (uri.Host.IndexOf("vimeo.com", StringComparison.InvariantCultureIgnoreCase) > -1)
                 {
                     _isVideo = true;
-                    LoadVimeoDataAsync(uri);
+                    _videoApiUri = new RUri(string.Format("https://vimeo.com/api/v2/video/{0}.json", uri.Segments[2]));
+                    _videoApiSource = "Vimeo";
+                    _videoApiParseResult = OnDownloadVimeoApiCompleted;
                 }
             }
 
@@ -136,28 +156,6 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
 
 
         #region Private methods
-
-        /// <summary>
-        /// Load YouTube video data (title, image, link) by calling YouTube API through the configured
-        /// <see cref="RAdapter.NetworkLoader"/> - the same funnel used for images/stylesheets/fonts, so a
-        /// consumer's custom loader (auth headers, proxy, timeouts) applies here too, not just a raw
-        /// process-wide <c>WebClient</c> bypassing it.
-        /// </summary>
-        private void LoadYoutubeDataAsync(Uri uri)
-        {
-            var apiUri = new RUri(string.Format("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={0}&format=json", uri.Segments[2]));
-            _ = FetchVideoApiDataAsync(apiUri, "YouTube", OnDownloadYoutubeApiCompleted);
-        }
-
-        /// <summary>
-        /// Load Vimeo video data (title, image, link) by calling Vimeo API through the configured
-        /// <see cref="RAdapter.NetworkLoader"/>.
-        /// </summary>
-        private void LoadVimeoDataAsync(Uri uri)
-        {
-            var apiUri = new RUri(string.Format("https://vimeo.com/api/v2/video/{0}.json", uri.Segments[2]));
-            _ = FetchVideoApiDataAsync(apiUri, "Vimeo", OnDownloadVimeoApiCompleted);
-        }
 
         /// <summary>
         /// Fetch and read <paramref name="apiUri"/> as text, fire-and-forget (matching
@@ -527,6 +525,21 @@ namespace TheArtOfDev.HtmlRenderer.Core.Dom
         /// <param name="g">the device to use</param>
         internal override void MeasureWordsSize(RGraphics g)
         {
+            // Kicks off the YouTube/Vimeo oEmbed API fetch (through the configured
+            // RAdapter.NetworkLoader - the same funnel used for images/stylesheets/fonts, so a consumer's
+            // custom loader applies here too) here rather than from the constructor: HtmlContainer walks
+            // up to the root box's own HtmlContainer, which DomParser.GenerateCssTree only assigns AFTER
+            // the whole box tree (including this one) has already been constructed - so at construction
+            // time it's always null. FetchVideoApiDataAsync dereferences it immediately (before its first
+            // genuine await), so starting the fetch from the constructor throws a NullReferenceException
+            // synchronously out of box-tree construction itself. MeasureWordsSize runs during layout, well
+            // after HtmlContainer is assigned, so it's a safe place to start this instead.
+            if (_isVideo && !_videoDataRequested)
+            {
+                _videoDataRequested = true;
+                _ = FetchVideoApiDataAsync(_videoApiUri, _videoApiSource, _videoApiParseResult);
+            }
+
             if (!_wordsSizeMeasured)
             {
                 MeasureWordSpacing(g);

@@ -42,6 +42,34 @@
     <EmbeddedResource Include="Resources\pdf.png" />
     <EmbeddedResource Include="Resources\stopwatch.png" />
     <EmbeddedResource Include="Resources\image32.png" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSans-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSans-Bold.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSans-Italic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSans-BoldItalic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSerif-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSerif-Bold.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSerif-Italic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationSerif-BoldItalic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationMono-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationMono-Bold.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationMono-Italic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\LiberationMono-BoldItalic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSans-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSans-Bold.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSans-Italic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSans-BoldItalic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSerif-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSerif-Bold.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSerif-Italic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\NotoSerif-BoldItalic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\Pacifico-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\DancingScript-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\Caveat-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\IndieFlower-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\ComicNeue-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\ComicNeue-Bold.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\ComicNeue-Italic.ttf" />
+    <EmbeddedResource Include="Resources\Fonts\ComicNeue-BoldItalic.ttf" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="TestSamples\01.Header.htm" />

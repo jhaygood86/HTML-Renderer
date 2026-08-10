@@ -144,6 +144,75 @@ namespace TheArtOfDev.HtmlRenderer.Core.Parse
         }
 
         /// <summary>
+        /// Resolves an <c>@font-face</c> rule's <c>font-family</c> descriptor value to the plain family
+        /// name: a single quoted string token unwraps to its literal text, anything else (an unquoted
+        /// identifier, or a value this tokenizer doesn't recognize as exactly one string) is returned as-is.
+        /// </summary>
+        internal static string GetFontFaceFamilyName(string propValue)
+        {
+            var tokens = GetCssTokens(propValue);
+
+            if (tokens.Count == 1 && tokens[0] is StringToken stringToken)
+            {
+                return stringToken.Data;
+            }
+
+            return propValue;
+        }
+
+        /// <summary>
+        /// Parses an <c>@font-face</c> <c>src</c> descriptor into its comma-separated candidates, each with
+        /// whatever <c>url()</c>/<c>local()</c>/<c>format()</c>/<c>tech()</c> pieces it declared - order
+        /// matters here: the top-level commas are split first, then each candidate segment is inspected on
+        /// its own, so a value with multiple <c>url()</c> alternatives (<c>src: url(a.woff2) format("woff2"),
+        /// url(a.woff) format("woff")</c>) doesn't have its tokens cross-matched between candidates.
+        /// </summary>
+        internal static List<CssFontFace> GetFontFacePropertyValue(string propValue)
+        {
+            var tokens = GetCssTokens(propValue);
+            var result = new List<CssFontFace>();
+            var segment = new List<Token>();
+
+            foreach (var token in tokens)
+            {
+                if (token.Type == TokenType.Comma)
+                {
+                    AppendFontFaceCandidate(result, segment);
+                    segment = new List<Token>();
+                }
+                else
+                {
+                    segment.Add(token);
+                }
+            }
+            AppendFontFaceCandidate(result, segment);
+
+            return result;
+        }
+
+        /// <summary>
+        /// Builds one <see cref="CssFontFace"/> candidate from a comma-delimited segment of an <c>src</c>
+        /// descriptor's tokens and appends it to <paramref name="result"/>, or does nothing for an empty
+        /// segment (a trailing/doubled comma).
+        /// </summary>
+        private static void AppendFontFaceCandidate(List<CssFontFace> result, List<Token> segment)
+        {
+            if (segment.Count == 0)
+                return;
+
+            var urlToken = segment.OfType<UrlToken>().SingleOrDefault();
+            var formatToken = segment.OfType<FunctionToken>().SingleOrDefault(t => t.Data == "format");
+            var techToken = segment.OfType<FunctionToken>().SingleOrDefault(t => t.Data == "tech");
+            var localToken = segment.OfType<FunctionToken>().SingleOrDefault(t => t.Data == "local");
+
+            result.Add(new CssFontFace(
+                urlToken?.Data,
+                formatToken?.ArgumentTokens?.FirstOrDefault()?.Data,
+                techToken?.ArgumentTokens?.FirstOrDefault()?.Data,
+                localToken?.ArgumentTokens?.FirstOrDefault()?.Data));
+        }
+
+        /// <summary>
         /// Recognizes a length string that is a single calc-family (calc/min/max/clamp) function call.
         /// Real grammar/type validation happens in the vendored CSS-OM's CalcValueConverter at parse
         /// time (for any value that didn't arrive via var() substitution); this is a syntactic

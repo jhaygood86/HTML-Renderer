@@ -217,6 +217,8 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     return cssBox.FontVariant;
                 case "font-weight":
                     return cssBox.FontWeight;
+                case "font-stretch":
+                    return cssBox.FontStretch;
                 case "list-style":
                     return cssBox.ListStyle;
                 case "list-style-position":
@@ -433,6 +435,9 @@ namespace TheArtOfDev.HtmlRenderer.Core.Utils
                     break;
                 case "font-weight":
                     cssBox.FontWeight = value;
+                    break;
+                case "font-stretch":
+                    cssBox.FontStretch = value;
                     break;
                 case "list-style":
                     cssBox.ListStyle = value;

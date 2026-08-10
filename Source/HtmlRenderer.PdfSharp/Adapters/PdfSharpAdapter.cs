@@ -13,9 +13,13 @@
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core.CssEngine;
+using TheArtOfDev.HtmlRenderer.Core.Network;
 using TheArtOfDev.HtmlRenderer.PdfSharp.FontResolution;
 using TheArtOfDev.HtmlRenderer.PdfSharp.Utilities;
 
@@ -57,6 +61,19 @@ namespace TheArtOfDev.HtmlRenderer.PdfSharp.Adapters
             {
                 AddFontFamily(new FontFamilyAdapter(new XFontFamily(fontFamily)));
             }
+        }
+
+        /// <summary>
+        /// Also recognizes a family registered via <see cref="AddFontFace"/> - those live entirely in
+        /// <see cref="FontResolver"/>, invisible to the shared <c>FontsHandler</c> the base implementation
+        /// checks (see <see cref="AddFontFace"/>'s own doc comment for why). Without this override,
+        /// <see cref="Core.Parse.CssParser.ParseFontFamily"/> would never see an <c>@font-face</c>-only
+        /// family as "existing" and would silently substitute <see cref="Core.Utils.CssConstants.DefaultFont"/>
+        /// for it before layout ever gets a chance to resolve the real face.
+        /// </summary>
+        public override bool IsFontExists(string font)
+        {
+            return base.IsFontExists(font) || _fontResolver.HasFamily(font);
         }
 
         /// <summary>
@@ -166,6 +183,81 @@ namespace TheArtOfDev.HtmlRenderer.PdfSharp.Adapters
             var fontStyle = Utils.Convert(style);
             var xFont = new XFont(((FontFamilyAdapter)family).FontFamily.Name, size, fontStyle, new XPdfFontOptions(PdfFontEncoding.Unicode));
             return new FontAdapter(xFont);
+        }
+
+        /// <summary>
+        /// Never called: this backend overrides <see cref="AddFontFace"/> directly (see its own doc
+        /// comment) rather than routing through the base's <c>LoadFontFaceFontInt</c>-based path.
+        /// </summary>
+        protected override RFontFamily LoadFontFaceFontInt(byte[] fontBytes, string filePath)
+        {
+            throw new NotSupportedException("PdfSharpAdapter overrides AddFontFace directly and never calls LoadFontFaceFontInt.");
+        }
+
+        /// <summary>
+        /// Bypasses the base <see cref="RAdapter.AddFontFace"/>/shared <c>FontsHandler</c> registry
+        /// entirely: PDFsharp's <see cref="IFontResolver"/> needs raw font bytes for PDF embedding, which
+        /// <see cref="FontResolver.AddFont(Stream,string,int?,bool?,int?,IReadOnlyList{CodepointRange})"/>
+        /// already stores and matches against directly - no platform font-family handle is involved.
+        /// </summary>
+        public override async Task<bool> AddFontFace(string familyName, RUri uri, int weight, bool isItalic, int stretch, IReadOnlyList<CodepointRange> ranges)
+        {
+            var networkResponse = await GetResourceStream(uri).ConfigureAwait(false);
+            if (networkResponse?.ResourceStream == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                using (networkResponse.ResourceStream)
+                {
+                    _fontResolver.AddFont(networkResponse.ResourceStream, familyName, weight, isItalic, stretch, ranges);
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Bypasses the shared registry, for the same reason as <see cref="AddFontFace"/> - see its doc comment.</summary>
+        public override bool AddFontFaceFromLocalFamily(string familyName, string localFamilyName, int weight, bool isItalic, int stretch, IReadOnlyList<CodepointRange> ranges)
+        {
+            return _fontResolver.AddLocalFontFamily(familyName, localFamilyName, weight, isItalic, stretch, ranges);
+        }
+
+        /// <summary>
+        /// Bypasses the shared registry, for the same reason as <see cref="AddFontFace"/> - see its doc
+        /// comment. PDFsharp's own <see cref="XFont(string,double,XFontStyle,XPdfFontOptions)"/>
+        /// construction only ever resolves by (family name, bold, italic) internally - there is no public
+        /// PDFsharp API surface to hand it an already-chosen numeric weight/stretch/face directly - so a
+        /// numeric <paramref name="weight"/> can only steer face selection as far as PDFsharp's own
+        /// bold/not-bold threshold allows; <paramref name="codepoint"/>, which that 2-bool resolution can't
+        /// express at all, is still honored precisely by consulting the richer
+        /// <see cref="FontResolver.ResolveTypeface(string,int,bool,int,int?)"/> overload up front purely to
+        /// preserve the "codepoint-scoped miss returns null" contract.
+        /// </summary>
+        public override RFont GetFont(string family, double size, RFontStyle style, int weight, int stretch, int? codepoint)
+        {
+            var isItalic = (style & RFontStyle.Italic) != 0;
+
+            if (codepoint.HasValue)
+            {
+                var info = _fontResolver.ResolveTypeface(family, weight, isItalic, stretch, codepoint);
+                if (info == null)
+                {
+                    return null;
+                }
+            }
+
+            var isBold = weight >= 600;
+            var residualStyle = (style & (RFontStyle.Underline | RFontStyle.Strikeout))
+                                 | (isBold ? RFontStyle.Bold : RFontStyle.Regular)
+                                 | (isItalic ? RFontStyle.Italic : RFontStyle.Regular);
+
+            return CreateFontInt(family, size, residualStyle);
         }
     }
 }

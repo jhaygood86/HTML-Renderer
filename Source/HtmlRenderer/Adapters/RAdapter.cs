@@ -17,6 +17,7 @@ using System.IO;
 using System.Threading.Tasks;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
 using TheArtOfDev.HtmlRenderer.Core;
+using TheArtOfDev.HtmlRenderer.Core.CssEngine;
 using TheArtOfDev.HtmlRenderer.Core.Entities;
 using TheArtOfDev.HtmlRenderer.Core.Handlers;
 using TheArtOfDev.HtmlRenderer.Core.Network;
@@ -55,6 +56,16 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
         /// cache of all the font used not to create same font again and again
         /// </summary>
         private readonly FontsHandler _fontsHandler;
+
+        /// <summary>
+        /// Dedup cache for <see cref="AddFontFace"/>, keyed by the resolved resource's absolute URI - since
+        /// the orchestrator re-runs <c>@font-face</c> registration on every <c>SetHtml</c> and this adapter
+        /// is a process-wide singleton, re-registering the same face's bytes with the platform text engine
+        /// on every call would leak native font handles (WinForms' <c>PrivateFontCollection.AddMemoryFont</c>/
+        /// WPF's <c>AddFontMemResourceEx</c> both register a *new* resource each call, even for identical
+        /// bytes - neither is idempotent).
+        /// </summary>
+        private readonly Dictionary<string, RFontFamily> _fontFaceCache = new Dictionary<string, RFontFamily>();
 
         /// <summary>
         /// default CSS parsed data singleton
@@ -147,6 +158,11 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
         private FileUriNetworkLoader _internalFileLoader;
         private FileUriNetworkLoader InternalFileLoader => _internalFileLoader ?? (_internalFileLoader = new FileUriNetworkLoader());
 
+        // Serves embedded: URIs unconditionally, the same way data:/file: are always handled internally
+        // regardless of which loader is configured - stateless (the target assembly is named in the URI
+        // itself, see EmbeddedResourceNetworkLoader), so a single shared instance needs no lazy init.
+        private static readonly EmbeddedResourceNetworkLoader InternalEmbeddedResourceLoader = new EmbeddedResourceNetworkLoader();
+
         /// <summary>
         /// The document's base URL, used to resolve relative <c>href</c>/<c>src</c>/CSS <c>url()</c>
         /// references that have no closer <c>&lt;base href&gt;</c> element to resolve against. Sourced from
@@ -158,9 +174,9 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
 
         /// <summary>
         /// Resolve an external resource (a stylesheet, image, or <c>@font-face</c> font) referenced by the
-        /// document, dispatching by URI scheme: <c>data:</c> and <c>file:</c> always resolve internally
-        /// (the latter refused outright when <see cref="AllowLocalFileAccess"/> is <c>false</c>), every
-        /// other scheme goes to the configured <see cref="NetworkLoader"/>.
+        /// document, dispatching by URI scheme: <c>data:</c>, <c>file:</c>, and <c>embedded:</c> always
+        /// resolve internally (<c>file:</c> refused outright when <see cref="AllowLocalFileAccess"/> is
+        /// <c>false</c>), every other scheme goes to the configured <see cref="NetworkLoader"/>.
         /// </summary>
         /// <param name="uri">the resource URI, already resolved to absolute against <see cref="BaseUri"/> or a <c>&lt;base href&gt;</c> element</param>
         /// <returns>the resolved resource, or null if it could not be resolved</returns>
@@ -193,6 +209,12 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
 
                 var fileLoader = NetworkLoader as FileUriNetworkLoader ?? InternalFileLoader;
                 return fileLoader.GetResourceStream(uri);
+            }
+
+            if (uri.Scheme == EmbeddedResourceNetworkLoader.Scheme)
+            {
+                var embeddedLoader = NetworkLoader as EmbeddedResourceNetworkLoader ?? InternalEmbeddedResourceLoader;
+                return embeddedLoader.GetResourceStream(uri);
             }
 
             return NetworkLoader.GetResourceStream(uri);
@@ -290,11 +312,20 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
         }
 
         /// <summary>
-        /// Check if the given font exists in the system by font family name.
+        /// Check if the given font exists in the system by font family name. Consulted by
+        /// <see cref="Core.Parse.CssParser.ParseFontFamily"/> to decide whether a <c>font-family</c>
+        /// candidate should be kept as-is or the next fallback (ultimately <see cref="Core.Utils.CssConstants.DefaultFont"/>)
+        /// tried instead - so this must recognize a family the moment it's usable, including one
+        /// registered via <see cref="AddFontFace"/>, not just <see cref="AddFontFamily"/>/system fonts.
         /// </summary>
         /// <param name="font">the font name to check</param>
         /// <returns>true - font exists by given family name, false - otherwise</returns>
-        public bool IsFontExists(string font)
+        /// <remarks>
+        /// Virtual so the PdfSharp backend can override it - its <c>@font-face</c> registrations live
+        /// entirely in its own <c>FontResolver</c> (see <see cref="AddFontFace"/>'s doc comment for why),
+        /// invisible to the shared <c>FontsHandler</c> this base implementation checks.
+        /// </remarks>
+        public virtual bool IsFontExists(string font)
         {
             return _fontsHandler.IsFontExists(font);
         }
@@ -321,6 +352,91 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
         }
 
         /// <summary>
+        /// Loads one <c>@font-face</c> <c>src: url(...)</c> candidate and registers it as a face of
+        /// <paramref name="familyName"/> for CSS Fonts Level 4 matching. Resolves the resource through
+        /// <see cref="GetResourceStream"/> - the same funnel used for images/stylesheets, so this supports
+        /// <c>file:</c>/<c>data:</c>/<c>http(s):</c> uniformly - loads the platform-specific face via
+        /// <see cref="LoadFontFaceFontInt"/>, and registers it with <see cref="FontsHandler.AddFontFace"/>.
+        /// </summary>
+        /// <param name="familyName">the CSS family name declared by the <c>@font-face</c> rule</param>
+        /// <param name="uri">the resolved, absolute <c>src</c> URI to fetch (already resolved against the document base/a stylesheet's own location by the caller)</param>
+        /// <param name="weight">CSS Fonts Level 4 numeric weight (1-1000) this face matches for</param>
+        /// <param name="isItalic">whether this face matches an italic/oblique request</param>
+        /// <param name="stretch">CSS Fonts Level 3 stretch (1-9) this face matches for</param>
+        /// <param name="ranges">the face's <c>unicode-range</c> restriction, or null for "covers whatever is asked of it"</param>
+        /// <returns>true if the face was loaded and registered, false if the resource could not be resolved/loaded (the caller tries the next <c>src</c> candidate)</returns>
+        /// <remarks>
+        /// Virtual so the PdfSharp backend can override it to bypass <see cref="FontsHandler"/>'s shared
+        /// registry entirely and register directly with its own <c>FontResolver</c> instead - PDFsharp
+        /// needs raw font bytes at PDF-generation time for embedding (via its own richer
+        /// <c>IFontResolver</c>-based CSS-Fonts-L4 matching), unlike WinForms/WPF, which just need an
+        /// opaque platform font-family handle. See the base implementation's own doc comment for the
+        /// shared-registry path this overrides.
+        /// </remarks>
+        public virtual async Task<bool> AddFontFace(string familyName, RUri uri, int weight, bool isItalic, int stretch, IReadOnlyList<CodepointRange> ranges)
+        {
+            RFontFamily fontFamily;
+            if (!_fontFaceCache.TryGetValue(uri.AbsoluteUri, out fontFamily))
+            {
+                var networkResponse = await GetResourceStream(uri).ConfigureAwait(false);
+                if (networkResponse == null || networkResponse.ResourceStream == null)
+                {
+                    return false;
+                }
+
+                byte[] fontBytes;
+                using (var memoryStream = new MemoryStream())
+                {
+                    using (networkResponse.ResourceStream)
+                    {
+                        networkResponse.ResourceStream.CopyTo(memoryStream);
+                    }
+                    fontBytes = memoryStream.ToArray();
+                }
+
+                try
+                {
+                    fontFamily = LoadFontFaceFontInt(fontBytes, uri.AbsoluteUri);
+                }
+                catch
+                {
+                    return false;
+                }
+
+                if (fontFamily == null)
+                {
+                    return false;
+                }
+
+                _fontFaceCache[uri.AbsoluteUri] = fontFamily;
+            }
+
+            _fontsHandler.AddFontFace(familyName, fontFamily, weight, isItalic, stretch, ranges);
+            return true;
+        }
+
+        /// <summary>
+        /// Satisfies an <c>@font-face</c> <c>src: local(...)</c> candidate: rather than fetching a resource
+        /// at all, this looks for a family already registered under <paramref name="localFamilyName"/> (a
+        /// system font, or an earlier <see cref="AddFontFamily"/>/<see cref="AddFontFace"/> registration)
+        /// and, if found, registers *that same* <see cref="RFontFamily"/> as a face of
+        /// <paramref name="familyName"/> too.
+        /// </summary>
+        /// <returns>true if a local family by that name was found and registered, false otherwise (the caller tries the next <c>src</c> candidate)</returns>
+        /// <remarks>Virtual for the same reason as <see cref="AddFontFace"/> - see its doc comment.</remarks>
+        public virtual bool AddFontFaceFromLocalFamily(string familyName, string localFamilyName, int weight, bool isItalic, int stretch, IReadOnlyList<CodepointRange> ranges)
+        {
+            var localFamily = _fontsHandler.TryGetExistingFamily(localFamilyName);
+            if (localFamily == null)
+            {
+                return false;
+            }
+
+            _fontsHandler.AddFontFace(familyName, localFamily, weight, isItalic, stretch, ranges);
+            return true;
+        }
+
+        /// <summary>
         /// Get font instance by given font family name, size and style.
         /// </summary>
         /// <param name="family">the font family name</param>
@@ -330,6 +446,28 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
         public RFont GetFont(string family, double size, RFontStyle style)
         {
             return _fontsHandler.GetCachedFont(family, size, style);
+        }
+
+        /// <summary>
+        /// Get font instance by given font family name, size, style, and CSS Fonts Level 4 numeric
+        /// weight/stretch - matches against any <c>@font-face</c> faces registered for <paramref name="family"/>
+        /// (see <see cref="FontsHandler.GetCachedFont(string,double,RFontStyle,int,int,int?)"/>), falling
+        /// back to the legacy family-name lookup when none are registered.
+        /// </summary>
+        /// <param name="family">the font family name</param>
+        /// <param name="size">font size</param>
+        /// <param name="style">font style (Italic/Underline/Strikeout are honored regardless of which face is chosen; Bold is superseded by <paramref name="weight"/>)</param>
+        /// <param name="weight">CSS Fonts Level 4 numeric weight (1-1000)</param>
+        /// <param name="stretch">CSS Fonts Level 3 stretch (1-9)</param>
+        /// <param name="codepoint">the box's first non-whitespace character's codepoint, for <c>unicode-range</c> face disambiguation, or null to skip it</param>
+        /// <returns>font instance, or null when <paramref name="codepoint"/> is given and no registered face covers it</returns>
+        /// <remarks>
+        /// Virtual so the PdfSharp backend can override it to bypass <see cref="FontsHandler"/>'s shared
+        /// registry entirely, for the same reason as <see cref="AddFontFace"/> - see its doc comment.
+        /// </remarks>
+        public virtual RFont GetFont(string family, double size, RFontStyle style, int weight, int stretch, int? codepoint)
+        {
+            return _fontsHandler.GetCachedFont(family, size, style, weight, stretch, codepoint);
         }
 
         /// <summary>
@@ -517,6 +655,19 @@ namespace TheArtOfDev.HtmlRenderer.Adapters
         /// <param name="style">font style</param>
         /// <returns>font instance</returns>
         protected abstract RFont CreateFontInt(RFontFamily family, double size, RFontStyle style);
+
+        /// <summary>
+        /// Registers <paramref name="fontBytes"/> (a loaded <c>@font-face</c> <c>src</c> candidate's raw
+        /// font file bytes) with the platform text engine and returns an opaque <see cref="RFontFamily"/>
+        /// handle for it - one file's bytes in, one face's family handle out (a WinForms/WPF
+        /// implementation registers with the OS/GDI text engine and returns a handle to that one face;
+        /// this is not called for backends - like PdfSharp - that override <see cref="AddFontFace"/> to
+        /// bypass this entirely).
+        /// </summary>
+        /// <param name="fontBytes">the font file's raw bytes (TTF/OTF)</param>
+        /// <param name="filePath">the resolved source this was loaded from, for diagnostics/error messages only</param>
+        /// <returns>the registered face's family handle, or null if the bytes could not be loaded as a font (the caller tries the next <c>src</c> candidate)</returns>
+        protected abstract RFontFamily LoadFontFaceFontInt(byte[] fontBytes, string filePath);
 
         /// <summary>
         /// Get data object for the given html and plain text data.<br />

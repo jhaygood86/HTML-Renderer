@@ -1,0 +1,80 @@
+using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core;
+using TheArtOfDev.HtmlRenderer.Core.Dom;
+
+namespace HtmlRenderer.Test.TestSupport;
+
+/// <summary>
+/// The shared lightweight layout harness: builds an <see cref="HtmlContainerInt"/> over a <see cref="MockAdapter"/>,
+/// runs layout, and hands back the laid-out box tree plus the container. Prefer this over hand-rolling another
+/// per-file box-tree setup.
+/// </summary>
+internal static class LayoutHarness
+{
+    /// <summary>
+    /// Lays <paramref name="html"/> out at <paramref name="maxWidth"/> × <paramref name="maxHeight"/> pixels.
+    /// </summary>
+    /// <param name="prepare">
+    /// Optional: run against the parsed box tree's root after <c>SetHtml</c> and before layout, for a test that
+    /// has to put something in the tree the parser cannot produce.
+    /// </param>
+    internal static (CssBox Root, HtmlContainerInt Container) Layout(
+        string html,
+        double maxWidth = 1000,
+        double maxHeight = 4000,
+        Action<CssBox>? prepare = null)
+    {
+        var container = new HtmlContainerInt(new MockAdapter())
+        {
+            MaxSize = new RSize(maxWidth, maxHeight),
+            Location = RPoint.Empty
+        };
+
+        container.SetHtml(html);
+
+        if (prepare is not null)
+        {
+            Assert.IsNotNull(container.Root);
+            prepare(container.Root!);
+        }
+
+        using var graphics = new RecordingGraphics();
+        container.PerformLayout(graphics);
+
+        Assert.IsNotNull(container.Root);
+
+        return (container.Root!, container);
+    }
+
+    /// <summary>Wraps a body fragment in a minimal document, so a test can state only the markup it cares about.</summary>
+    internal static string Wrap(string body) => $"<html><head></head><body style='margin:0'>{body}</body></html>";
+
+    /// <summary>Depth-first search for the box carrying <c>id="<paramref name="id"/>"</c>.</summary>
+    internal static CssBox? FindById(CssBox box, string id)
+    {
+        if (box.HtmlTag?.TryGetAttribute("id") == id)
+            return box;
+
+        foreach (var childBox in box.Boxes)
+        {
+            var found = FindById(childBox, id);
+            if (found is not null) return found;
+        }
+
+        return null;
+    }
+
+    /// <summary>Every box in the tree, in document order.</summary>
+    internal static IEnumerable<CssBox> Descendants(CssBox box)
+    {
+        yield return box;
+
+        foreach (var childBox in box.Boxes)
+        {
+            foreach (var descendant in Descendants(childBox))
+            {
+                yield return descendant;
+            }
+        }
+    }
+}

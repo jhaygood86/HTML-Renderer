@@ -112,6 +112,32 @@ public sealed class PdfGeneratorTests
         File.WriteAllBytes(pdfPath, pdf);
     }
 
+    [TestMethod]
+    public void GeneratePdf_SimpleHtml_ProducesAtLeastOnePage()
+    {
+        // Act
+        using var document = PdfGenerator.GeneratePdf("<p>Hello</p>", PageSize.A4);
+
+        // Assert
+        Assert.IsTrue(document.Pages.Count >= 1);
+    }
+
+    [TestMethod]
+    public void GeneratePdf_SimpleHtml_CanBeSaved()
+    {
+        // Arrange
+        using var document = PdfGenerator.GeneratePdf("<p>Hello</p>", PageSize.A4);
+
+        // Act
+        using var stream = new MemoryStream();
+        document.Save(stream, false);
+
+        // Assert
+        var pdf = stream.ToArray();
+        Assert.IsGreaterThan(4, pdf.Length);
+        Assert.AreEqual("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));
+    }
+
     private static void OnImageLoadPdfSharp(object? sender, HtmlImageLoadEventArgs e)
     {
         if (!string.Equals(e.Src, "ImageIcon", StringComparison.OrdinalIgnoreCase))

@@ -23,6 +23,10 @@ For existing implementations see: HtmlRenderer.WinForms, HtmlRenderer.WPF and Ht
     <EmbeddedResource Include="Core\Utils\ImageLoad.png" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="HtmlRenderer.Test" />
+    <InternalsVisibleTo Include="HtmlRenderer.IntegrationTest" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>

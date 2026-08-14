@@ -30,6 +30,9 @@ Features and Benefits:
     <ProjectReference Include="..\HtmlRenderer\HtmlRenderer.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="HtmlRenderer.PdfSharp.Test" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
     <PackageReference Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>

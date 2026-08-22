@@ -20,4 +20,8 @@
         <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <EmbeddedResource Include="CssEngineSupport\bootstrap.css" />
+    </ItemGroup>
+
 </Project>

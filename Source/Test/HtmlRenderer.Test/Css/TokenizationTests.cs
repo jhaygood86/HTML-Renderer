@@ -1,0 +1,181 @@
+using TheArtOfDev.HtmlRenderer.Core.CssEngine;
+
+namespace HtmlRenderer.Test.Css;
+
+/// <summary>
+/// Ported from PeachPDF.Tests/CSS/Tokenization.cs (<c>CssTokenizationTests</c>). <c>Lexer</c>, hash-token
+/// classification (incl. escape-forces-id-hash), and CR/CRLF/LF normalization all match HTML-Renderer's
+/// <c>Parser/Lexer.cs</c> / <c>Parser/LexerBase.cs</c> line-for-line.
+/// </summary>
+[TestClass]
+public sealed class TokenizationTests
+{
+    [TestMethod]
+    public void CssParserIdentifier()
+    {
+        var teststring = "h1 { background: blue; }";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual(TokenType.Ident, token.Type);
+    }
+
+    [TestMethod]
+    public void CssParserAtRule()
+    {
+        var teststring = "@media { background: blue; }";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual(TokenType.AtKeyword, token.Type);
+    }
+
+    [TestMethod]
+    public void CssParserUrlUnquoted()
+    {
+        var url = "http://someurl";
+        var teststring = "url(" + url + ")";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual(url, token.Data);
+    }
+
+    [TestMethod]
+    public void CssParserUrlDoubleQuoted()
+    {
+        var url = "http://someurl";
+        var teststring = "url(\"" + url + "\")";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual(url, token.Data);
+    }
+
+    [TestMethod]
+    public void CssParserUrlSingleQuoted()
+    {
+        var url = "http://someurl";
+        var teststring = "url('" + url + "')";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual(url, token.Data);
+    }
+
+    // Exercises Lexer.UrlBad, the CSS Syntax bad-url-token recovery state: consume and discard
+    // characters until the url()'s matching close-paren (or an earlier ';'/unmatched '}') so the
+    // tokenizer resynchronizes rather than getting stuck on malformed input.
+    [TestMethod]
+    public void CssParserUrlBad_UnexpectedQuoteInUnquotedUrl_RecoversAtClosingParen()
+    {
+        var teststring = "url(bad\"value) next";
+        var tokenizer = new Lexer(new TextSource(teststring));
+
+        var urlToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Url, urlToken.Type);
+
+        Assert.AreEqual(TokenType.Whitespace, tokenizer.Get().Type);
+
+        var nextToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Ident, nextToken.Type);
+        Assert.AreEqual("next", nextToken.Data);
+    }
+
+    [TestMethod]
+    public void CssParserUrlBad_LineBreakInsideQuotedUrl_RecoversAtClosingParen()
+    {
+        var teststring = "url(\"unterminated\nstring\") next";
+        var tokenizer = new Lexer(new TextSource(teststring));
+
+        var urlToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Url, urlToken.Type);
+
+        Assert.AreEqual(TokenType.Whitespace, tokenizer.Get().Type);
+
+        var nextToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Ident, nextToken.Type);
+        Assert.AreEqual("next", nextToken.Data);
+    }
+
+    [TestMethod]
+    public void CssParserUrlBad_SemicolonInsideBadUrl_StopsAtSemicolon()
+    {
+        var teststring = "url(bad\"value; next";
+        var tokenizer = new Lexer(new TextSource(teststring));
+
+        var urlToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Url, urlToken.Type);
+
+        var nextToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Semicolon, nextToken.Type);
+    }
+
+    [TestMethod]
+    public void CssParserUrlBad_NestedParenInsideBadUrl_RequiresMatchingCloseParen()
+    {
+        // The stray '(' bumps UrlBad's paren-depth counter, so the first ')' just closes the
+        // nested paren rather than ending the url() - only the second ')' does.
+        var teststring = "url(bad\"va(lue)) next";
+        var tokenizer = new Lexer(new TextSource(teststring));
+
+        var urlToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Url, urlToken.Type);
+
+        Assert.AreEqual(TokenType.Whitespace, tokenizer.Get().Type);
+
+        var nextToken = tokenizer.Get();
+        Assert.AreEqual(TokenType.Ident, nextToken.Type);
+        Assert.AreEqual("next", nextToken.Data);
+    }
+
+    // In a value context, '#' begins a <hash-token> (CSS Syntax §4.3.4): an all-hex name is a color
+    // literal, any other name stays an id hash-token (e.g. the '#id' inside element()). Previously a
+    // non-hex hash was truncated at the first non-hex char into an empty color + a stray ident.
+    [TestMethod]
+    public void ValueContextHash()
+    {
+        static void Check(string input, TokenType expectedType, string expectedData)
+        {
+            var lexer = new Lexer(new TextSource(input)) { IsInValue = true };
+            var token = lexer.Get();
+            Assert.AreEqual(expectedType, token.Type);
+            Assert.AreEqual(expectedData, token.Data);
+            Assert.AreEqual(TokenType.EndOfFile, lexer.Get().Type); // whole name is one token, no trailing ident
+        }
+
+        Check("#f00", TokenType.Color, "f00");
+        Check("#abc123", TokenType.Color, "abc123");
+        Check("#deadbeef", TokenType.Color, "deadbeef");
+        Check("#hero", TokenType.Hash, "hero");
+        Check("#top", TokenType.Hash, "top");
+        Check("#f00bar", TokenType.Hash, "f00bar");
+        Check("#\\41", TokenType.Hash, "A"); // an escape in the name → id hash-token (not a color)
+
+        // '#' not followed by a name code point or valid escape is a plain '#' delimiter, not a hash-token.
+        var delim = new Lexer(new TextSource("# ")) { IsInValue = true };
+        Assert.AreEqual(TokenType.Delim, delim.Get().Type);
+    }
+
+    [TestMethod]
+    public void LexerOnlyCarriageReturn()
+    {
+        var teststring = "\r";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual("\n", token.Data);
+    }
+
+    [TestMethod]
+    public void LexerCarriageReturnLineFeed()
+    {
+        var teststring = "\r\n";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual("\n", token.Data);
+    }
+
+    [TestMethod]
+    public void LexerOnlyLineFeed()
+    {
+        var teststring = "\n";
+        var tokenizer = new Lexer(new TextSource(teststring));
+        var token = tokenizer.Get();
+        Assert.AreEqual("\n", token.Data);
+    }
+}

@@ -12,6 +12,16 @@ namespace HtmlRenderer.Test.TestSupport;
 /// </summary>
 internal sealed class MockAdapter : RAdapter
 {
+    /// <summary>
+    /// The CSS media type this adapter reports for <c>@media</c> evaluation (see
+    /// <see cref="TheArtOfDev.HtmlRenderer.Core.MediaQueryContext.FromAdapter"/>). Defaults to "screen",
+    /// like the base <see cref="RAdapter.DefaultMediaType"/>; settable so a test can exercise "@media print"
+    /// (or any other media type) deterministically without depending on a real platform adapter.
+    /// </summary>
+    public string MediaType { get; set; } = "screen";
+
+    public override string DefaultMediaType => MediaType;
+
     protected override RColor GetColorInt(string colorName)
     {
         var color = Color.FromName(colorName);
@@ -22,7 +32,8 @@ internal sealed class MockAdapter : RAdapter
 
     protected override RBrush CreateSolidBrush(RColor color) => new MockBrush(color);
 
-    protected override RBrush CreateLinearGradientBrush(RRect rect, RColor color1, RColor color2, double angle) => new MockBrush(color1);
+    protected override RBrush CreateLinearGradientBrush(RPoint p1, RPoint p2, (RColor Color, double Position)[] stops) =>
+        new MockBrush(stops.Length > 0 ? stops[0].Color : RColor.Black);
 
     protected override RImage ConvertImageInt(object image) => image as RImage ?? new MockImage(0, 0);
 
@@ -31,6 +42,8 @@ internal sealed class MockAdapter : RAdapter
     protected override RFont CreateFontInt(string family, double size, RFontStyle style) => new MockFont(size);
 
     protected override RFont CreateFontInt(RFontFamily family, double size, RFontStyle style) => new MockFont(size);
+
+    protected override RFontFamily LoadFontFaceFontInt(byte[] fontBytes, string filePath) => new MockFontFamily(filePath);
 }
 
 /// <summary>A pen that remembers the color it was created with.</summary>
@@ -65,4 +78,10 @@ internal sealed class MockFont(double size) : RFont
     public override double UnderlineOffset => size * 0.9;
     public override double LeftPadding => size * 0.2;
     public override double GetWhitespaceWidth(RGraphics graphics) => size * 0.25;
+}
+
+/// <summary>A font family stand-in for @font-face loading, independent of any real font file parsing.</summary>
+internal sealed class MockFontFamily(string name) : RFontFamily
+{
+    public override string Name => name;
 }

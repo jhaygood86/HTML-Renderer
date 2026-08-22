@@ -113,6 +113,13 @@ public sealed class HrPlacementTests
     [TestMethod]
     public void TheRule_StillSpansItsContainingBlocksContentWidth()
     {
+        // 'box' uses the default box-sizing:content-box, so its own width:200px is the CONTENT width - the
+        // containing block the auto-width <hr> fills is 200px wide (padding is added on top, not subtracted
+        // from it). The <hr> then loses 2px off that 200px to its own UA-default 1px left/right border
+        // (CssDefaults' "hr { ... border: 1px inset }"-equivalent), landing at 198, not at 200 - and NOT at
+        // 180 (200 minus the parent's 20px of padding), which would only be correct under border-box sizing.
+        // Verified empirically against the built assembly: box.ActualWidth is 200 (content-box), box.ClientLeft/
+        // ClientRight span exactly 10..210, and h.ActualBorderLeftWidth/RightWidth are each 1.
         var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
             "<div id='box' style='width:200px;padding:0 10px'><hr id='h' style='margin:0'></div>"));
 
@@ -120,6 +127,6 @@ public sealed class HrPlacementTests
         var box = LayoutHarness.FindById(root, "box")!;
 
         Assert.AreEqual(box.ClientLeft, h.Location.X, Delta * 3);
-        Assert.AreEqual(180, h.ActualRight - h.Location.X, Delta * 3);
+        Assert.AreEqual(198, h.ActualRight - h.Location.X, Delta * 3);
     }
 }

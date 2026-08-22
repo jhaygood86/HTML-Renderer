@@ -1,159 +1,179 @@
 using HtmlRenderer.IntegrationTest.TestSupport;
+using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core.Dom;
 
 namespace HtmlRenderer.IntegrationTest.Painting;
 
 /// <summary>
-/// Standard CSS <c>border-radius</c> (shorthand and all four longhands) is not recognized anywhere in this
-/// fork's Core (confirmed: zero hits for "border-radius"/"border-top-left-radius"/etc. in
-/// <c>Utils/CssUtils.cs</c>'s property dispatch, the only place inline/stylesheet CSS property names are mapped
-/// onto <c>CssBox</c> members) - it is silently dropped as an unrecognized declaration, so corners stay square
-/// no matter what value is given. Instead this fork has a proprietary equivalent: the <c>corner-radius</c>
-/// shorthand and <c>corner-nw-radius</c>/<c>corner-ne-radius</c>/<c>corner-se-radius</c>/<c>corner-sw-radius</c>
-/// longhands (<c>Utils/CssUtils.cs</c> ~99-107/258-270, backed by <c>CssBoxProperties.CornerRadius</c>/
-/// <c>CornerNwRadius</c>/etc., ~Dom/CssBoxProperties.cs 277-337), with computed <c>ActualCornerNw</c>/
-/// <c>ActualCornerNe</c>/<c>ActualCornerSe</c>/<c>ActualCornerSw</c> doubles and a boolean <c>IsRounded</c>
-/// (true if any corner is greater than 0) - see ~1110-1172 of the same file.
+/// Ported from PeachPDF.Tests/Integration/BorderRadiusIntegrationTests.cs.
+/// Standard CSS <c>border-radius</c> (shorthand and all four longhands) used to be entirely unrecognized
+/// by this fork's Core, which instead had a proprietary <c>corner-radius</c>/<c>corner-{nw,ne,se,sw}-radius</c>
+/// mechanism (backed by <c>CssBoxProperties.CornerRadius</c>/<c>ActualCornerNw</c>/etc.) as its only way to
+/// get rounded corners. The CSS engine port replaced that proprietary mechanism entirely with a real,
+/// spec-compliant implementation (see Source/HtmlRenderer/Core/Dom/CssBoxProperties.cs ~1257-1400):
+///   - the standard 4-longhand model (<c>BorderTopLeftRadius</c>/<c>BorderTopRightRadius</c>/
+///     <c>BorderBottomRightRadius</c>/<c>BorderBottomLeftRadius</c>), each carrying independent X/Y radii
+///     (elliptical corners, via a "h v" pair per longhand, or "/" in the shorthand);
+///   - the <c>border-radius</c> shorthand's real CSS Backgrounds 3 5.5 1/2/3/4-value expansion, in the
+///     correct top-left/top-right/bottom-right/bottom-left order (unlike the old proprietary shorthand's
+///     NE/NW/SE/SW order);
+///   - percentage-of-box-dimension resolution (<c>ActualBorderTopLeftRadiusX</c> resolves a percentage
+///     against <c>Size.Width</c>, <c>...RadiusY</c> against <c>Size.Height</c> - not hardcoded to 0); and
+///   - overlap reduction via <c>ComputeRadii</c>, exactly CSS Backgrounds 3 4's "scale every radius down
+///     proportionally if adjacent corners would sum to more than an edge's length" algorithm.
+/// So every case below - including the four that were previously <c>[Ignore]</c>d because border-radius
+/// didn't exist at all - now genuinely passes against the real properties
+/// (<c>ActualBorderTopLeftRadiusX/Y</c> etc., <c>IsRounded</c>, <c>ComputeRadii</c>), and this file also
+/// ports the elliptical/percentage/overlap-reduction cases from PeachPDF's original test file that the
+/// old proprietary mechanism had no representable equivalent for at all. The proprietary
+/// <c>corner-radius</c>/<c>corner-*-radius</c> syntax and its backing <c>ActualCornerNw/Ne/Se/Sw</c>/
+/// <c>CornerRadius</c> members have been removed from Core entirely, so the "supplementary" tests this
+/// file used to carry for them are gone too.
 /// </summary>
-/// <remarks>
-/// PeachPDF's source file also covers elliptical radii (distinct X/Y per corner via <c>border-radius: 40pt /
-/// 15pt</c>), percentage-relative radii, and radius-overlap reduction via a <c>ComputeRadii</c> method. None of
-/// those have ANY representable equivalent on this fork: the proprietary <c>corner-*-radius</c> properties are
-/// single values (no X/Y distinction at all - see the four single-value properties above), radius resolution
-/// hardcodes its percentage basis to 0 (<c>CssValueParser.ParseLength(CornerNwRadius, 0, this)</c>, ~line 1116 -
-/// so a percentage corner radius always resolves to 0 regardless of box size), and no <c>ComputeRadii</c> or
-/// overlap-reduction method exists anywhere in Core. Porting those cases would require asserting on properties
-/// that don't exist, so they are intentionally dropped rather than forced to compile under a false premise -
-/// only the circular-radius PeachPDF cases are ported below (mapped onto this fork's corner-name properties:
-/// north-west/north-east/south-east/south-west correspond to top-left/top-right/bottom-right/bottom-left).
-/// </remarks>
 [DoNotParallelize]
 [TestClass]
 public sealed class BorderRadiusIntegrationTests
 {
     private const double Delta = 0.5;
 
-    [Ignore("border-radius (and every longhand) is not a recognized CSS property anywhere in this fork's Core - " +
-            "see this class's remarks. It is silently dropped, so all four corners stay at their default 0, and " +
-            "IsRounded stays false instead of true.")]
+    // ── Circular radii (symmetric X = Y) ────────────────────────────────────────────────────────────────
+
     [TestMethod]
     public void BorderRadius_Shorthand_SetsAllCorners()
     {
-        var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px;border-radius:10px;border:1px solid black'></div>"));
-        var box = LayoutHarness.FindById(root, "c")!;
+        var box = FindDivBox("border-radius:10px;border:1px solid black");
 
-        Assert.AreEqual(10.0, box.ActualCornerNw, Delta);
-        Assert.AreEqual(10.0, box.ActualCornerNe, Delta);
-        Assert.AreEqual(10.0, box.ActualCornerSe, Delta);
-        Assert.AreEqual(10.0, box.ActualCornerSw, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderTopLeftRadiusX, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderTopLeftRadiusY, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderTopRightRadiusX, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderTopRightRadiusY, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderBottomRightRadiusX, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderBottomRightRadiusY, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderBottomLeftRadiusX, Delta);
+        Assert.AreEqual(10.0, box.ActualBorderBottomLeftRadiusY, Delta);
         Assert.IsTrue(box.IsRounded);
     }
 
-    [Ignore("border-radius is not a recognized CSS property on this fork - see this class's remarks. All four " +
-            "corners stay at 0 instead of the opposing-pair values (top-left/bottom-right=10, " +
-            "top-right/bottom-left=20) the shorthand should assign.")]
     [TestMethod]
     public void BorderRadius_TwoValues_SetsOpposingCorners()
     {
-        var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px;border-radius:10px 20px'></div>"));
-        var box = LayoutHarness.FindById(root, "c")!;
+        var box = FindDivBox("border-radius:10px 20px");
 
-        Assert.AreEqual(10.0, box.ActualCornerNw, Delta); // top-left
-        Assert.AreEqual(20.0, box.ActualCornerNe, Delta); // top-right
-        Assert.AreEqual(10.0, box.ActualCornerSe, Delta); // bottom-right
-        Assert.AreEqual(20.0, box.ActualCornerSw, Delta); // bottom-left
+        Assert.AreEqual(10.0, box.ActualBorderTopLeftRadiusX, Delta);      // top-left
+        Assert.AreEqual(20.0, box.ActualBorderTopRightRadiusX, Delta);     // top-right
+        Assert.AreEqual(10.0, box.ActualBorderBottomRightRadiusX, Delta);  // bottom-right
+        Assert.AreEqual(20.0, box.ActualBorderBottomLeftRadiusX, Delta);   // bottom-left
     }
 
-    [Ignore("border-radius is not a recognized CSS property on this fork - see this class's remarks. All four " +
-            "corners stay at 0 instead of the four individually-assigned values.")]
     [TestMethod]
     public void BorderRadius_FourValues_SetsAllCornersIndividually()
     {
-        var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px;border-radius:5px 10px 15px 20px'></div>"));
-        var box = LayoutHarness.FindById(root, "c")!;
+        var box = FindDivBox("border-radius:5px 10px 15px 20px");
 
-        Assert.AreEqual(5.0, box.ActualCornerNw, Delta);  // top-left
-        Assert.AreEqual(10.0, box.ActualCornerNe, Delta); // top-right
-        Assert.AreEqual(15.0, box.ActualCornerSe, Delta); // bottom-right
-        Assert.AreEqual(20.0, box.ActualCornerSw, Delta); // bottom-left
+        Assert.AreEqual(5.0, box.ActualBorderTopLeftRadiusX, Delta);       // top-left
+        Assert.AreEqual(10.0, box.ActualBorderTopRightRadiusX, Delta);     // top-right
+        Assert.AreEqual(15.0, box.ActualBorderBottomRightRadiusX, Delta);  // bottom-right
+        Assert.AreEqual(20.0, box.ActualBorderBottomLeftRadiusX, Delta);   // bottom-left
     }
 
-    [Ignore("border-top-left-radius (the standard longhand) is not a recognized CSS property on this fork either " +
-            "- see this class's remarks. box.ActualCornerNw stays 0 and IsRounded stays false instead of true.")]
     [TestMethod]
     public void BorderTopLeftRadius_Longhand_SetsOnlyTopLeft()
     {
-        var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px;border-top-left-radius:12px'></div>"));
-        var box = LayoutHarness.FindById(root, "c")!;
+        var box = FindDivBox("border-top-left-radius:12px");
 
-        Assert.AreEqual(12.0, box.ActualCornerNw, Delta);
-        Assert.AreEqual(0.0, box.ActualCornerNe, Delta);
-        Assert.AreEqual(0.0, box.ActualCornerSe, Delta);
-        Assert.AreEqual(0.0, box.ActualCornerSw, Delta);
+        Assert.AreEqual(12.0, box.ActualBorderTopLeftRadiusX, Delta);
+        Assert.AreEqual(12.0, box.ActualBorderTopLeftRadiusY, Delta);
+        Assert.AreEqual(0.0, box.ActualBorderTopRightRadiusX, Delta);
+        Assert.AreEqual(0.0, box.ActualBorderBottomRightRadiusX, Delta);
+        Assert.AreEqual(0.0, box.ActualBorderBottomLeftRadiusX, Delta);
         Assert.IsTrue(box.IsRounded);
     }
 
     [TestMethod]
     public void BorderRadius_Zero_IsNotRounded()
     {
-        // No radius declared at all - the default-square-corners baseline is identical on both engines, so this
-        // one genuinely passes here; it isn't exercising the border-radius-unrecognized gap at all.
-        var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px'></div>"));
-        var box = LayoutHarness.FindById(root, "c")!;
-
+        var box = FindDivBox("");
         Assert.IsFalse(box.IsRounded);
     }
 
-    // ─── Supplementary: this fork's proprietary corner-radius/corner-*-radius syntax (not ported from PeachPDF -
-    // demonstrates the equivalent feature this fork actually has working, per this class's remarks) ────────────
+    // ── Elliptical radii (X != Y) ───────────────────────────────────────────────────────────────────────
 
     [TestMethod]
-    public void CornerRadius_Shorthand_SingleValue_SetsAllCornersAndIsRounded()
+    public void BorderRadius_EllipticalShorthand_SetsAllCornersXAndY()
     {
-        var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px;corner-radius:10px'></div>"));
-        var box = LayoutHarness.FindById(root, "c")!;
+        // border-radius: 40px / 15px -> each corner: X=40, Y=15
+        var box = FindDivBox("border-radius:40px / 15px");
 
-        Assert.AreEqual(10.0, box.ActualCornerNw, Delta);
-        Assert.AreEqual(10.0, box.ActualCornerNe, Delta);
-        Assert.AreEqual(10.0, box.ActualCornerSe, Delta);
-        Assert.AreEqual(10.0, box.ActualCornerSw, Delta);
-        Assert.IsTrue(box.IsRounded);
+        Assert.AreEqual(40.0, box.ActualBorderTopLeftRadiusX, Delta);
+        Assert.AreEqual(15.0, box.ActualBorderTopLeftRadiusY, Delta);
+        Assert.AreEqual(40.0, box.ActualBorderTopRightRadiusX, Delta);
+        Assert.AreEqual(15.0, box.ActualBorderTopRightRadiusY, Delta);
+        Assert.AreEqual(40.0, box.ActualBorderBottomRightRadiusX, Delta);
+        Assert.AreEqual(15.0, box.ActualBorderBottomRightRadiusY, Delta);
+        Assert.AreEqual(40.0, box.ActualBorderBottomLeftRadiusX, Delta);
+        Assert.AreEqual(15.0, box.ActualBorderBottomLeftRadiusY, Delta);
     }
 
     [TestMethod]
-    public void CornerNwRadius_Longhand_SetsOnlyTopLeftCorner()
+    public void BorderTopLeftRadius_Longhand_EllipticalValues()
     {
+        // border-top-left-radius: 15px 25px -> X=15, Y=25
+        var box = FindDivBox("border-top-left-radius:15px 25px");
+
+        Assert.AreEqual(15.0, box.ActualBorderTopLeftRadiusX, Delta);
+        Assert.AreEqual(25.0, box.ActualBorderTopLeftRadiusY, Delta);
+        Assert.AreEqual(0.0, box.ActualBorderTopRightRadiusX, Delta);
+    }
+
+    // ── Percentage values ────────────────────────────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public void BorderRadius_Percentage_ResolvesRelativeToDimensions()
+    {
+        // 200x100 box; border-radius: 50% -> X = 50% of 200 = 100, Y = 50% of 100 = 50
+        var box = FindDivBox("border-radius:50%");
+
+        Assert.AreEqual(100.0, box.ActualBorderTopLeftRadiusX, 1);
+        Assert.AreEqual(50.0, box.ActualBorderTopLeftRadiusY, 1);
+    }
+
+    // ── Overlapping radii reduction ─────────────────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public void BorderRadius_OverlappingRadii_AreReducedProportionally()
+    {
+        // 100x100 box; border-radius: 60px - adjacent radii sum to 120 > 100, so all must scale by
+        // 100/120 (roughly 0.833), giving ~50px at the boundary.
         var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px;corner-nw-radius:12px'></div>"));
+            "<div id='c' style='width:100px;height:100px;border-radius:60px'></div>"));
         var box = LayoutHarness.FindById(root, "c")!;
 
-        Assert.AreEqual(12.0, box.ActualCornerNw, Delta);
-        Assert.AreEqual(0.0, box.ActualCornerNe, Delta);
-        Assert.AreEqual(0.0, box.ActualCornerSe, Delta);
-        Assert.AreEqual(0.0, box.ActualCornerSw, Delta);
-        Assert.IsTrue(box.IsRounded);
+        var radii = box.ComputeRadii(new RRect(0, 0, 100, 100));
+
+        Assert.AreEqual(100.0, radii.TLX + radii.TRX, 2);
+        Assert.AreEqual(100.0, radii.BLX + radii.BRX, 2);
+        Assert.AreEqual(100.0, radii.TLY + radii.BLY, 2);
+        Assert.AreEqual(100.0, radii.TRY + radii.BRY, 2);
     }
 
     [TestMethod]
-    public void CornerRadius_FourValues_AssignsCornersInProprietaryNeNwSeSwOrder()
+    public void BorderRadius_NonOverlappingRadii_AreNotChanged()
     {
-        // Unlike standard CSS border-radius (top-left/top-right/bottom-right/bottom-left order), this fork's
-        // 4-value corner-radius shorthand assigns in NE/NW/SE/SW order - confirmed directly from
-        // CssBoxProperties.CornerRadius's setter (Dom/CssBoxProperties.cs ~303-308):
-        //   case 4: CornerNeRadius = r[0]; CornerNwRadius = r[1]; CornerSeRadius = r[2]; CornerSwRadius = r[3];
+        // 200x200 box; border-radius: 30px - 30+30=60 < 200, no reduction.
         var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
-            "<div id='c' style='width:200px;height:100px;corner-radius:5px 10px 15px 20px'></div>"));
+            "<div id='c' style='width:200px;height:200px;border-radius:30px'></div>"));
         var box = LayoutHarness.FindById(root, "c")!;
 
-        Assert.AreEqual(5.0, box.ActualCornerNe, Delta);
-        Assert.AreEqual(10.0, box.ActualCornerNw, Delta);
-        Assert.AreEqual(15.0, box.ActualCornerSe, Delta);
-        Assert.AreEqual(20.0, box.ActualCornerSw, Delta);
-        Assert.IsTrue(box.IsRounded);
+        var radii = box.ComputeRadii(new RRect(0, 0, 200, 200));
+
+        Assert.AreEqual(30.0, radii.TLX, 2);
+        Assert.AreEqual(30.0, radii.TLY, 2);
+    }
+
+    private static CssBox FindDivBox(string css)
+    {
+        var (root, _) = LayoutHarness.Layout(LayoutHarness.Wrap(
+            $"<div id='c' style='width:200px;height:100px;{css}'></div>"));
+        return LayoutHarness.FindById(root, "c")!;
     }
 }

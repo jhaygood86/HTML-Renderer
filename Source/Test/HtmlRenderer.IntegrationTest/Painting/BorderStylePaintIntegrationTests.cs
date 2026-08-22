@@ -26,13 +26,15 @@ namespace HtmlRenderer.IntegrationTest.Painting;
 ///
 /// Also confirmed by direct source read of <c>Core/Parse/DomParser.cs</c> (~436-449): the deprecated
 /// presentational <c>border</c> HTML attribute forces solid on all four sides for a plain (non-table) element,
-/// same as PeachPDF. And by direct source read of <c>Core/Parse/CssParser.cs</c> (~787-815,
-/// <c>SplitMultiDirectionValues</c>/<c>SplitValues</c>): multi-value border shorthands (<c>border-color</c>,
-/// <c>border-width</c>, <c>border-style</c>) split strictly on spaces with a standing <c>//TODO: CRITICAL!
-/// Don't split values on parenthesis (like rgb(0, 0, 0))</c> - so a 4-value <c>border-color</c> using
-/// space-containing <c>rgb(r, g, b)</c> tokens (as PeachPDF's fixture does) would be mis-split into far more
-/// than 4 tokens. The 4-value color test below therefore uses comma-only <c>rgb(r,g,b)</c> (no internal spaces)
-/// to exercise the per-side shorthand-resolution feature itself without tripping this unrelated parsing gap.
+/// same as PeachPDF.
+///
+/// The old hand-rolled <c>CssParser.SplitMultiDirectionValues</c>/<c>SplitValues</c> (which split strictly on
+/// spaces, with no parenthesis-awareness, and so used to mis-split a space-containing <c>rgb(r, g, b)</c>
+/// token inside a multi-value shorthand like a 4-value <c>border-color</c>) no longer exists - the CSS engine
+/// port's real tokenizer handles parenthesized functions correctly regardless of internal spaces. The 4-value
+/// color test below still uses comma-only <c>rgb(r,g,b)</c> input for historical parity with that old
+/// constraint, but the resolved <c>BorderTopColor</c>/etc. values it asserts on are the engine's own
+/// normalized "rgb(r, g, b)" (spaced) serialization, not the literal input text.
 /// </remarks>
 [DoNotParallelize]
 [TestClass]
@@ -215,15 +217,15 @@ public sealed class BorderStylePaintIntegrationTests
     [TestMethod]
     public void BorderStyleDoubleWithRoundedCorners_FallsBackToASingleUnstripedStroke()
     {
-        // PeachPDF's analogous test uses standard CSS 'border-radius', but that property (and every longhand) is
-        // not recognized anywhere in this fork's Core at all - see the sibling BorderRadiusIntegrationTests
-        // class's remarks - so it would be silently dropped and have zero effect. This fork's real (proprietary)
-        // equivalent is 'corner-radius' (CssBoxProperties.CornerRadius), used here so the box actually IS
-        // rounded and GetRoundedBorderPath takes the rounded-path branch (BordersDrawHandler.DrawBorder ->
-        // g.DrawPath), which - like the non-rounded path - has no double/groove/ridge case either (GetPen's
-        // DashStyle switch has no 'double' case), so it silently falls back to a single solid-colored stroke.
+        // PeachPDF's analogous test uses standard CSS 'border-radius'. This fork's CSS engine port added real
+        // border-radius support (see the sibling BorderRadiusIntegrationTests class's remarks), so it's used
+        // directly here (the proprietary 'corner-radius' this comment used to describe as the only working
+        // equivalent has been removed) so the box actually IS rounded and GetRoundedBorderPath takes the
+        // rounded-path branch (BordersDrawHandler.DrawBorder -> g.DrawPath), which - like the non-rounded path -
+        // has no double/groove/ridge case either (GetPen's DashStyle switch has no 'double' case), so it
+        // silently falls back to a single solid-colored stroke.
         var (root, container) = PaintHarness.Layout(PaintHarness.Wrap(
-            "<div id='b' style='border-top-style: double; border-top-width: 12px; border-top-color: rgb(51,51,51); corner-radius: 8px'>x</div>"));
+            "<div id='b' style='border-top-style: double; border-top-width: 12px; border-top-color: rgb(51,51,51); border-radius: 8px'>x</div>"));
         var div = PaintHarness.FindById(root, "b")!;
         Assert.IsTrue(div.IsRounded);
 
@@ -263,17 +265,16 @@ public sealed class BorderStylePaintIntegrationTests
     [TestMethod]
     public void BorderColorFourValueShorthand_ResolvesTopRightBottomLeftPerSide()
     {
-        // Uses comma-only rgb(r,g,b) tokens (no internal spaces) - see this class's remarks on
-        // CssParser.SplitValues not being paren-aware, which would otherwise mis-split a space-containing
-        // "rgb(1, 0, 0)" style value in a multi-value shorthand like this one.
         var (root, _) = PaintHarness.Layout(PaintHarness.Wrap(
             "<div id='b' style='border-style:solid; border-width:1px; border-color: rgb(1,0,0) rgb(0,1,0) rgb(0,0,1) rgb(1,1,0)'>x</div>"));
         var div = PaintHarness.FindById(root, "b")!;
 
-        Assert.AreEqual("rgb(1,0,0)", div.BorderTopColor);
-        Assert.AreEqual("rgb(0,1,0)", div.BorderRightColor);
-        Assert.AreEqual("rgb(0,0,1)", div.BorderBottomColor);
-        Assert.AreEqual("rgb(1,1,0)", div.BorderLeftColor);
+        // The resolved longhand values are the engine's own normalized "rgb(r, g, b)" (spaced) text, not
+        // the literal comma-only input - see this class's remarks.
+        Assert.AreEqual("rgb(1, 0, 0)", div.BorderTopColor);
+        Assert.AreEqual("rgb(0, 1, 0)", div.BorderRightColor);
+        Assert.AreEqual("rgb(0, 0, 1)", div.BorderBottomColor);
+        Assert.AreEqual("rgb(1, 1, 0)", div.BorderLeftColor);
     }
 
     [TestMethod]

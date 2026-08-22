@@ -18,13 +18,18 @@ internal static class LayoutHarness
     /// Optional: run against the parsed box tree's root after <c>SetHtml</c> and before layout, for a test that
     /// has to put something in the tree the parser cannot produce.
     /// </param>
+    /// <param name="adapter">
+    /// Optional: a caller-supplied <see cref="MockAdapter"/> (e.g. with a non-default <c>MediaType</c> for
+    /// <c>@media</c> tests). Defaults to a plain <c>new MockAdapter()</c>.
+    /// </param>
     internal static (CssBox Root, HtmlContainerInt Container) Layout(
         string html,
         double maxWidth = 1000,
         double maxHeight = 4000,
-        Action<CssBox>? prepare = null)
+        Action<CssBox>? prepare = null,
+        MockAdapter? adapter = null)
     {
-        var container = new HtmlContainerInt(new MockAdapter())
+        var container = new HtmlContainerInt(adapter ?? new MockAdapter())
         {
             MaxSize = new RSize(maxWidth, maxHeight),
             Location = RPoint.Empty

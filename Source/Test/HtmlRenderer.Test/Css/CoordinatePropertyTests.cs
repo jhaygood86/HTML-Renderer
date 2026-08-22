@@ -9,115 +9,88 @@ namespace HtmlRenderer.Test.Css;
 /// CssBoxProperties has no Left/Right/Top/Bottom/MinWidth/MinHeight/MaxHeight CSS properties (only
 /// Width, Height and MaxWidth exist - see CssBoxProperties.cs), so all left/top/right/bottom and
 /// min-*/max-height source cases were dropped.
-/// Validity is exercised through the real parsing pipeline (CssParser.ParseCssBlock -&gt;
-/// CssParser.AddProperty -&gt; ParseLengthProperty -&gt; CssValueParser.IsValidLength), the same gate that
-/// inline "style" attributes and stylesheet rules go through: an invalid width/height value is simply
-/// dropped from the parsed property dictionary rather than being kept with some "has no value" flag.
+/// The old <c>CssParser.ParseCssBlock</c>/<c>CssData.GetCssBlock</c> raw-property-dictionary API this
+/// file originally used no longer exists - the CSS engine port replaced it with a real, spec-compliant
+/// parser (ported from ExCSS via PeachPDF) whose only declaration-level introspection surface is
+/// <see cref="CssParser.ParseInlineStyle"/>, returning an <c>IStyleRule</c> whose <c>Style</c>
+/// (a <c>StyleDeclaration</c>) exposes each longhand as a typed, validating property - an invalid value
+/// is simply never stored, so <c>GetPropertyValue</c>/the string indexer returns "" rather than throwing
+/// or keeping a "has no value" flag. Validity is exercised through that same real pipeline (tokenizer -&gt;
+/// grammar -&gt; value converter) that inline "style" attributes and stylesheet rules go through.
 /// </summary>
 [TestClass]
 public sealed class CoordinatePropertyTests
 {
-    private static IDictionary<string, string> ParseProperties(string declaration)
+    private static string GetProperty(string declaration, string propertyName)
     {
-        var parser = new CssParser(new MockAdapter());
-        var block = parser.ParseCssBlock("test", declaration);
-        Assert.IsNotNull(block);
-        return block.Properties;
+        var rule = new CssParser(new MockAdapter()).ParseInlineStyle(declaration);
+        Assert.IsNotNull(rule);
+        return rule.Style[propertyName];
     }
 
     [TestMethod]
     public void CssHeightLegalPercentage()
     {
-        var properties = ParseProperties("height: 28%");
-
-        Assert.IsTrue(properties.ContainsKey("height"));
-        Assert.AreEqual("28%", properties["height"]);
+        Assert.AreEqual("28%", GetProperty("height: 28%", "height"));
     }
 
     [TestMethod]
     public void CssHeightLegalLengthInEm()
     {
-        var properties = ParseProperties("height: 0.3em");
-
-        Assert.IsTrue(properties.ContainsKey("height"));
-        Assert.AreEqual("0.3em", properties["height"]);
+        Assert.AreEqual("0.3em", GetProperty("height: 0.3em", "height"));
     }
 
     [TestMethod]
     public void CssHeightLegalLengthInPx()
     {
-        var properties = ParseProperties("height: 144px");
-
-        Assert.IsTrue(properties.ContainsKey("height"));
-        Assert.AreEqual("144px", properties["height"]);
+        Assert.AreEqual("144px", GetProperty("height: 144px", "height"));
     }
 
     [TestMethod]
     public void CssHeightLegalAutoUppercase()
     {
-        var properties = ParseProperties("height: AUTO");
-
-        Assert.IsTrue(properties.ContainsKey("height"));
-        Assert.AreEqual("auto", properties["height"]);
+        Assert.AreEqual("auto", GetProperty("height: AUTO", "height"));
     }
 
     [TestMethod]
     public void CssWidthLegalLengthInCm()
     {
-        var properties = ParseProperties("width: 0.5cm");
-
-        Assert.IsTrue(properties.ContainsKey("width"));
-        Assert.AreEqual("0.5cm", properties["width"]);
+        Assert.AreEqual("0.5cm", GetProperty("width: 0.5cm", "width"));
     }
 
     [TestMethod]
     public void CssWidthLegalLengthInMm()
     {
-        var properties = ParseProperties("width: 1.5mm");
-
-        Assert.IsTrue(properties.ContainsKey("width"));
-        Assert.AreEqual("1.5mm", properties["width"]);
+        Assert.AreEqual("1.5mm", GetProperty("width: 1.5mm", "width"));
     }
 
     [TestMethod]
     public void CssWidthIllegalLength()
     {
-        var properties = ParseProperties("width: 1.5 meter");
-
-        Assert.IsFalse(properties.ContainsKey("width"));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty("width: 1.5 meter", "width")));
     }
 
     [TestMethod]
     public void CssWidthPercentLegal()
     {
-        var properties = ParseProperties("width: 20.5%");
-
-        Assert.IsTrue(properties.ContainsKey("width"));
-        Assert.AreEqual("20.5%", properties["width"]);
+        Assert.AreEqual("20.5%", GetProperty("width: 20.5%", "width"));
     }
 
     [TestMethod]
     public void CssWidthLegalLengthInInches()
     {
-        var properties = ParseProperties("width: 3in");
-
-        Assert.IsTrue(properties.ContainsKey("width"));
-        Assert.AreEqual("3in", properties["width"]);
+        Assert.AreEqual("3in", GetProperty("width: 3in", "width"));
     }
 
     [TestMethod]
     public void CssHeightAngleIllegal()
     {
-        var properties = ParseProperties("height: 3deg");
-
-        Assert.IsFalse(properties.ContainsKey("height"));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty("height: 3deg", "height")));
     }
 
     [TestMethod]
     public void CssHeightResolutionIllegal()
     {
-        var properties = ParseProperties("height: 3dpi");
-
-        Assert.IsFalse(properties.ContainsKey("height"));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty("height: 3dpi", "height")));
     }
 }

@@ -1,52 +1,44 @@
-using System.Collections.Generic;
-using System.Linq;
 using HtmlRenderer.Test.TestSupport;
-using TheArtOfDev.HtmlRenderer.Adapters.Entities;
-using TheArtOfDev.HtmlRenderer.Core;
 using TheArtOfDev.HtmlRenderer.Core.Parse;
 
 namespace HtmlRenderer.Test.Css;
 
 /// <summary>
 /// Ported from PeachPDF.Tests/CSS/PropertyTests/BorderProperty.cs.
-/// PeachPDF.CSS models each border-related declaration as a typed, validating Property (HasValue reports
-/// whether the value was legal, and illegal/wrong-count values are rejected outright). HTML-Renderer has no
-/// such typed property model:
-///   * Longhand properties (e.g. "border-top-color", "border-style") and the per-axis shorthands
-///     ("border-color", "border-style", "border-width", "border-spacing") are expanded by
-///     <see cref="CssParser"/>'s private AddProperty/SplitMultiDirectionValues into a flat
-///     Dictionary&lt;string, string&gt; of longhand keys with NO legality validation of the individual
-///     tokens -- illegal keywords (e.g. "wavy") are stored verbatim, while a value with more tokens than
-///     SplitMultiDirectionValues understands (5 values for a 1/2/3/4-value shorthand) silently leaves all of
-///     the corresponding longhand keys unset (a real, testable no-op) rather than being flagged as rejected.
-///   * The single-side shorthands ("border", "border-left", "border-top", "border-right", "border-bottom")
-///     all funnel through the public <see cref="CssParser.ParseBorder"/>, which tokenizes the value on
-///     whitespace and independently matches a width/style/color out of the tokens. Because the tokenizer is
-///     whitespace-only, values containing a color function with internal spaces (e.g. "rgb(255, 100, 0)")
-///     cannot be recognized as a color at all -- a real, testable current limitation.
-/// These tests exercise the real CssData/CssParser/CssBox pipeline and assert on the values it actually
-/// produces; a handful of cases where PeachPDF's expectation reflects behavior HTML-Renderer does not (yet)
-/// implement are marked with an [Ignore] documenting the intended target behavior.
+/// The CSS engine port replaced the old hand-rolled border parsing entirely - both the
+/// Dictionary&lt;string,string&gt; longhand expansion via <c>CssParser.AddProperty</c>/
+/// <c>SplitMultiDirectionValues</c> (no legality validation of individual tokens: illegal keywords like
+/// "wavy" used to be stored verbatim, and a too-long value list used to silently leave the whole
+/// longhand set unset) and the public <c>CssParser.ParseBorder</c> whitespace-only tokenizer (which
+/// couldn't recognize a color function containing internal spaces, e.g. "rgb(255, 100, 0)", or a bare
+/// unitless "0" width, or "currentColor") - with the same real, typed, validating value-converter
+/// pipeline PeachPDF's own CSS engine uses (see Source/HtmlRenderer/Core/CssEngine/StyleProperties/Border/).
+/// Exercised here through <see cref="CssParser.ParseInlineStyle"/> and the resulting
+/// <c>StyleDeclaration</c>'s longhand properties (colors normalize to "rgb(r, g, b)"/"rgba(r, g, b, a)"
+/// text; a longhand a shorthand's grammar didn't cover resolves to the literal string "initial" per CSS
+/// Cascading - a shorthand always sets every longhand it manages, explicitly or to its initial value -
+/// rather than being left unset/null as the old parser's positional splitting did).
+/// Every case the old whitespace-tokenizer/no-validation model couldn't handle now genuinely works
+/// against the real engine and is un-ignored below: BorderSpacingPercentIllegal, BorderStyleWavyIllegal,
+/// BorderLeftZeroLegal (bare "0" width), BorderBottomRgbLegal (color function with internal spaces), and
+/// BorderOutSetCurrentColor ("currentColor" keyword) - all verified by actually running against the real
+/// pipeline (see the probe values in this port's chat history), not assumed.
 /// </summary>
 [TestClass]
 public sealed class BorderPropertyTests
 {
-    /// <summary>Parses a single declaration inside a throwaway ruleset and returns its expanded, longhand properties.</summary>
-    private static IDictionary<string, string> ParseDeclaration(string declaration)
+    private static string GetProperty(string declaration, string propertyName)
     {
-        var cssData = CssData.Parse(new MockAdapter(), $"test {{ {declaration} }}", false);
-        return cssData.GetCssBlock("test").First().Properties;
+        var rule = new CssParser(new MockAdapter()).ParseInlineStyle(declaration);
+        Assert.IsNotNull(rule);
+        return rule.Style[propertyName];
     }
 
-    /// <summary>Parses a "border"/"border-left"/"border-top"/"border-right"/"border-bottom" shorthand value directly.</summary>
-    private static void ParseBorderShorthand(string value, out string width, out string style, out string color)
+    private static string GetPriority(string declaration, string propertyName)
     {
-        new CssParser(new MockAdapter()).ParseBorder(value, out width, out style, out color);
-    }
-
-    private static RColor ResolveColor(string colorText)
-    {
-        return new CssParser(new MockAdapter()).ParseColor(colorText);
+        var rule = new CssParser(new MockAdapter()).ParseInlineStyle(declaration);
+        Assert.IsNotNull(rule);
+        return rule.Style.GetPropertyPriority(propertyName);
     }
 
     // ── border-spacing ───────────────────────────────────────────────────────────────────────────────────
@@ -54,46 +46,33 @@ public sealed class BorderPropertyTests
     [TestMethod]
     public void BorderSpacingLengthLegal()
     {
-        var properties = ParseDeclaration("border-spacing: 20px");
-
-        Assert.AreEqual("20px", properties["border-spacing"]);
+        Assert.AreEqual("20px", GetProperty("border-spacing: 20px", "border-spacing"));
     }
 
     [TestMethod]
     public void BorderSpacingZeroLegal()
     {
-        var properties = ParseDeclaration("border-spacing: 0");
-
-        Assert.AreEqual("0", properties["border-spacing"]);
+        Assert.AreEqual("0", GetProperty("border-spacing: 0", "border-spacing"));
     }
 
     [TestMethod]
     public void BorderSpacingLengthLengthLegal()
     {
-        var properties = ParseDeclaration("border-spacing: 15px 3em");
-
-        Assert.AreEqual("15px 3em", properties["border-spacing"]);
+        Assert.AreEqual("15px 3em", GetProperty("border-spacing: 15px 3em", "border-spacing"));
     }
 
     [TestMethod]
     public void BorderSpacingLengthZeroLegal()
     {
-        var properties = ParseDeclaration("border-spacing: 15px 0");
-
-        Assert.AreEqual("15px 0", properties["border-spacing"]);
+        Assert.AreEqual("15px 0", GetProperty("border-spacing: 15px 0", "border-spacing"));
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void BorderSpacingPercentIllegal()
     {
-        // PeachPDF: a percentage is not a legal border-spacing value, so it is rejected (HasValue == false).
-        // HTML-Renderer's CssParser does not dispatch "border-spacing" to any validating parse routine -- it
-        // falls through to the unconditional fallback branch in AddProperty and is stored verbatim. Target/
-        // intended behavior: the illegal value is rejected and no "border-spacing" property is stored.
-        var properties = ParseDeclaration("border-spacing: 15%");
-
-        Assert.IsFalse(properties.ContainsKey("border-spacing"));
+        // A percentage is not a legal border-spacing value (only <length> is allowed) - the real engine
+        // now actually validates this (the old parser stored it verbatim, unfiltered).
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty("border-spacing: 15%", "border-spacing")));
     }
 
     // ── longhand border-*-color ──────────────────────────────────────────────────────────────────────────
@@ -101,36 +80,27 @@ public sealed class BorderPropertyTests
     [TestMethod]
     public void BorderBottomColorRedLegal()
     {
-        var properties = ParseDeclaration("border-bottom-color: red");
-
-        Assert.AreEqual("red", properties["border-bottom-color"]);
-        Assert.AreEqual(RColor.FromArgb(255, 0, 0), ResolveColor(properties["border-bottom-color"]));
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty("border-bottom-color: red", "border-bottom-color"));
     }
 
     [TestMethod]
     public void BorderTopColorHexLegal()
     {
-        var properties = ParseDeclaration("border-top-color: #0F0");
-
-        Assert.AreEqual("#0f0", properties["border-top-color"]);
-        Assert.AreEqual(RColor.FromArgb(0, 255, 0), ResolveColor(properties["border-top-color"]));
+        Assert.AreEqual("rgb(0, 255, 0)", GetProperty("border-top-color: #0F0", "border-top-color"));
     }
 
     [TestMethod]
     public void BorderRightColorRgbaLegal()
     {
-        var properties = ParseDeclaration("border-right-color: rgba(1, 1, 1, 0)");
-
-        Assert.AreEqual("rgba(1, 1, 1, 0)", properties["border-right-color"]);
+        Assert.AreEqual("rgba(1, 1, 1, 0)", GetProperty("border-right-color: rgba(1, 1, 1, 0)", "border-right-color"));
     }
 
     [TestMethod]
     public void BorderLeftColorRgbLegal()
     {
-        var properties = ParseDeclaration("border-left-color: rgb(1, 255, 100)  !important");
-
-        // "!important" is stripped by the parser regardless of the (nonexistent) importance flag
-        Assert.AreEqual("rgb(1, 255, 100)", properties["border-left-color"]);
+        const string declaration = "border-left-color: rgb(1, 255, 100)  !important";
+        Assert.AreEqual("rgb(1, 255, 100)", GetProperty(declaration, "border-left-color"));
+        Assert.AreEqual("important", GetPriority(declaration, "border-left-color"));
     }
 
     // ── border-color (all-sides shorthand) ───────────────────────────────────────────────────────────────
@@ -138,69 +108,69 @@ public sealed class BorderPropertyTests
     [TestMethod]
     public void BorderColorTransparentLegal()
     {
-        var properties = ParseDeclaration("border-color: transparent");
+        const string declaration = "border-color: transparent";
 
-        Assert.AreEqual("transparent", properties["border-top-color"]);
-        Assert.AreEqual("transparent", properties["border-right-color"]);
-        Assert.AreEqual("transparent", properties["border-bottom-color"]);
-        Assert.AreEqual("transparent", properties["border-left-color"]);
+        Assert.AreEqual("rgba(0, 0, 0, 0)", GetProperty(declaration, "border-top-color"));
+        Assert.AreEqual("rgba(0, 0, 0, 0)", GetProperty(declaration, "border-right-color"));
+        Assert.AreEqual("rgba(0, 0, 0, 0)", GetProperty(declaration, "border-bottom-color"));
+        Assert.AreEqual("rgba(0, 0, 0, 0)", GetProperty(declaration, "border-left-color"));
     }
 
     [TestMethod]
     public void BorderColorRedGreenLegal()
     {
-        var properties = ParseDeclaration("border-color: red   green");
+        const string declaration = "border-color: red   green";
 
-        Assert.AreEqual("red", properties["border-top-color"]);
-        Assert.AreEqual("red", properties["border-bottom-color"]);
-        Assert.AreEqual("green", properties["border-left-color"]);
-        Assert.AreEqual("green", properties["border-right-color"]);
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-top-color"));
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-bottom-color"));
+        Assert.AreEqual("rgb(0, 128, 0)", GetProperty(declaration, "border-left-color"));
+        Assert.AreEqual("rgb(0, 128, 0)", GetProperty(declaration, "border-right-color"));
     }
 
     [TestMethod]
     public void BorderColorRedRgbLegal()
     {
-        var properties = ParseDeclaration("border-color: red   rgb(0,0,0)");
+        const string declaration = "border-color: red   rgb(0,0,0)";
 
-        Assert.AreEqual("red", properties["border-top-color"]);
-        Assert.AreEqual("red", properties["border-bottom-color"]);
-        Assert.AreEqual("rgb(0,0,0)", properties["border-left-color"]);
-        Assert.AreEqual("rgb(0,0,0)", properties["border-right-color"]);
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-top-color"));
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-bottom-color"));
+        Assert.AreEqual("rgb(0, 0, 0)", GetProperty(declaration, "border-left-color"));
+        Assert.AreEqual("rgb(0, 0, 0)", GetProperty(declaration, "border-right-color"));
     }
 
     [TestMethod]
     public void BorderColorRedBlueGreenLegal()
     {
-        var properties = ParseDeclaration("border-color: red blue green");
+        const string declaration = "border-color: red blue green";
 
-        Assert.AreEqual("red", properties["border-top-color"]);
-        Assert.AreEqual("blue", properties["border-left-color"]);
-        Assert.AreEqual("blue", properties["border-right-color"]);
-        Assert.AreEqual("green", properties["border-bottom-color"]);
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-top-color"));
+        Assert.AreEqual("rgb(0, 0, 255)", GetProperty(declaration, "border-left-color"));
+        Assert.AreEqual("rgb(0, 0, 255)", GetProperty(declaration, "border-right-color"));
+        Assert.AreEqual("rgb(0, 128, 0)", GetProperty(declaration, "border-bottom-color"));
     }
 
     [TestMethod]
     public void BorderColorRedBlueGreenBlackLegal()
     {
-        var properties = ParseDeclaration("border-color: red blue green   BLACK");
+        const string declaration = "border-color: red blue green   BLACK";
 
-        Assert.AreEqual("red", properties["border-top-color"]);
-        Assert.AreEqual("blue", properties["border-right-color"]);
-        Assert.AreEqual("green", properties["border-bottom-color"]);
-        Assert.AreEqual("black", properties["border-left-color"]);
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-top-color"));
+        Assert.AreEqual("rgb(0, 0, 255)", GetProperty(declaration, "border-right-color"));
+        Assert.AreEqual("rgb(0, 128, 0)", GetProperty(declaration, "border-bottom-color"));
+        Assert.AreEqual("rgb(0, 0, 0)", GetProperty(declaration, "border-left-color"));
     }
 
     [TestMethod]
     public void BorderColorRedBlueGreenBlackTransparentIllegal()
     {
-        // SplitMultiDirectionValues only understands 1-4 values; a 5-value list matches none of its cases,
-        // so none of the border-*-color longhands get set at all (a real, silent no-op).
-        var properties = ParseDeclaration("border-color: red blue green black transparent");
+        // A 5-value list is invalid for a 1/2/3/4-value periodic shorthand, so none of the
+        // border-*-color longhands get set at all.
+        const string declaration = "border-color: red blue green black transparent";
 
-        Assert.IsFalse(properties.ContainsKey("border-top-color"));
-        Assert.IsFalse(properties.ContainsKey("border-right-color"));
-        Assert.IsFalse(properties.ContainsKey("border-bottom-color"));
-        Assert.IsFalse(properties.ContainsKey("border-left-color"));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-top-color")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-right-color")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-bottom-color")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-left-color")));
     }
 
     // ── border-style (longhand + all-sides shorthand) ────────────────────────────────────────────────────
@@ -208,350 +178,335 @@ public sealed class BorderPropertyTests
     [TestMethod]
     public void BorderStyleDottedLegal()
     {
-        var properties = ParseDeclaration("border-style: dotted");
+        const string declaration = "border-style: dotted";
 
-        Assert.AreEqual("dotted", properties["border-top-style"]);
-        Assert.AreEqual("dotted", properties["border-right-style"]);
-        Assert.AreEqual("dotted", properties["border-bottom-style"]);
-        Assert.AreEqual("dotted", properties["border-left-style"]);
+        Assert.AreEqual("dotted", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("dotted", GetProperty(declaration, "border-right-style"));
+        Assert.AreEqual("dotted", GetProperty(declaration, "border-bottom-style"));
+        Assert.AreEqual("dotted", GetProperty(declaration, "border-left-style"));
     }
 
     [TestMethod]
     public void BorderStyleInsetOutsetUpperLegal()
     {
-        var properties = ParseDeclaration("border-style: INSET   OUTset");
+        const string declaration = "border-style: INSET   OUTset";
 
-        Assert.AreEqual("inset", properties["border-top-style"]);
-        Assert.AreEqual("inset", properties["border-bottom-style"]);
-        Assert.AreEqual("outset", properties["border-left-style"]);
-        Assert.AreEqual("outset", properties["border-right-style"]);
+        Assert.AreEqual("inset", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("inset", GetProperty(declaration, "border-bottom-style"));
+        Assert.AreEqual("outset", GetProperty(declaration, "border-left-style"));
+        Assert.AreEqual("outset", GetProperty(declaration, "border-right-style"));
     }
 
     [TestMethod]
     public void BorderStyleDoubleGrooveLegal()
     {
-        var properties = ParseDeclaration("border-style: double   groove");
+        const string declaration = "border-style: double   groove";
 
-        Assert.AreEqual("double", properties["border-top-style"]);
-        Assert.AreEqual("double", properties["border-bottom-style"]);
-        Assert.AreEqual("groove", properties["border-left-style"]);
-        Assert.AreEqual("groove", properties["border-right-style"]);
+        Assert.AreEqual("double", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("double", GetProperty(declaration, "border-bottom-style"));
+        Assert.AreEqual("groove", GetProperty(declaration, "border-left-style"));
+        Assert.AreEqual("groove", GetProperty(declaration, "border-right-style"));
     }
 
     [TestMethod]
     public void BorderStyleRidgeSolidDashedLegal()
     {
-        var properties = ParseDeclaration("border-style: ridge solid dashed");
+        const string declaration = "border-style: ridge solid dashed";
 
-        Assert.AreEqual("ridge", properties["border-top-style"]);
-        Assert.AreEqual("solid", properties["border-left-style"]);
-        Assert.AreEqual("solid", properties["border-right-style"]);
-        Assert.AreEqual("dashed", properties["border-bottom-style"]);
+        Assert.AreEqual("ridge", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("solid", GetProperty(declaration, "border-left-style"));
+        Assert.AreEqual("solid", GetProperty(declaration, "border-right-style"));
+        Assert.AreEqual("dashed", GetProperty(declaration, "border-bottom-style"));
     }
 
     [TestMethod]
     public void BorderStyleHiddenDottedNoneNoneLegal()
     {
-        var properties = ParseDeclaration("border-style   :   hidden  dotted  NONE   nONe");
+        const string declaration = "border-style   :   hidden  dotted  NONE   nONe";
 
-        Assert.AreEqual("hidden", properties["border-top-style"]);
-        Assert.AreEqual("dotted", properties["border-right-style"]);
-        Assert.AreEqual("none", properties["border-bottom-style"]);
-        Assert.AreEqual("none", properties["border-left-style"]);
+        Assert.AreEqual("hidden", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("dotted", GetProperty(declaration, "border-right-style"));
+        Assert.AreEqual("none", GetProperty(declaration, "border-bottom-style"));
+        Assert.AreEqual("none", GetProperty(declaration, "border-left-style"));
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void BorderStyleWavyIllegal()
     {
-        // PeachPDF: an invalid border-style keyword is rejected (HasValue == false). HTML-Renderer's
-        // SplitMultiDirectionValues-based shorthand expansion performs no keyword legality validation, so
-        // "wavy" is currently accepted and stored verbatim on all four sides. Target/intended behavior: the
-        // illegal keyword is rejected and no border-*-style longhands are set.
-        var properties = ParseDeclaration("border-style: wavy");
+        // An invalid border-style keyword is rejected by the real engine, so none of the
+        // border-*-style longhands get set (the old parser had no keyword validation at all and let
+        // "wavy" through unfiltered onto all four sides).
+        const string declaration = "border-style: wavy";
 
-        Assert.IsFalse(properties.ContainsKey("border-top-style"));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-top-style")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-right-style")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-bottom-style")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-left-style")));
     }
 
     [TestMethod]
     public void BorderBottomStyleGrooveLegal()
     {
-        var properties = ParseDeclaration("border-bottom-style: GROOVE");
-
-        Assert.AreEqual("groove", properties["border-bottom-style"]);
+        Assert.AreEqual("groove", GetProperty("border-bottom-style: GROOVE", "border-bottom-style"));
     }
 
     [TestMethod]
     public void BorderTopStyleNoneLegal()
     {
-        var properties = ParseDeclaration("border-top-style:none");
-
-        Assert.AreEqual("none", properties["border-top-style"]);
+        Assert.AreEqual("none", GetProperty("border-top-style:none", "border-top-style"));
     }
 
     [TestMethod]
     public void BorderRightStyleDoubleLegal()
     {
-        var properties = ParseDeclaration("border-right-style:double");
-
-        Assert.AreEqual("double", properties["border-right-style"]);
+        Assert.AreEqual("double", GetProperty("border-right-style:double", "border-right-style"));
     }
 
     [TestMethod]
     public void BorderLeftStyleHiddenLegal()
     {
-        var properties = ParseDeclaration("border-left-style: hidden  !important");
-
-        Assert.AreEqual("hidden", properties["border-left-style"]);
+        const string declaration = "border-left-style: hidden  !important";
+        Assert.AreEqual("hidden", GetProperty(declaration, "border-left-style"));
+        Assert.AreEqual("important", GetPriority(declaration, "border-left-style"));
     }
 
     // ── border-width (longhand + all-sides shorthand) ────────────────────────────────────────────────────
+    // NOTE: unlike the old parser (which stored the "thin"/"medium"/"thick" keyword text verbatim), the
+    // real engine's LineWidthConverter resolves these keywords straight to their pixel value at parse
+    // time (this fork's scale: thin=1px, medium=3px, thick=5px - matching PeachPDF's own scale, since
+    // both share the same vendored converter), so the stored longhand value is already "1px"/"3px"/"5px".
 
     [TestMethod]
     public void BorderBottomWidthThinLegal()
     {
-        var properties = ParseDeclaration("border-bottom-width: THIN");
-
-        Assert.AreEqual("thin", properties["border-bottom-width"]);
-        // "thin"/"medium"/"thick" resolve to fixed pixel widths independent of any box (HTML-Renderer's own
-        // scale: thin=1, medium=2, thick=4 -- different from PeachPDF's 1/3/5 scale).
-        Assert.AreEqual(1d, CssValueParser.GetActualBorderWidth("thin", null!));
+        Assert.AreEqual("1px", GetProperty("border-bottom-width: THIN", "border-bottom-width"));
     }
 
     [TestMethod]
     public void BorderTopWidthZeroLegal()
     {
-        var properties = ParseDeclaration("border-top-width: 0");
-
-        Assert.AreEqual("0", properties["border-top-width"]);
+        Assert.AreEqual("0", GetProperty("border-top-width: 0", "border-top-width"));
     }
 
     [TestMethod]
     public void BorderRightWidthEmLegal()
     {
-        var properties = ParseDeclaration("border-right-width: 3em");
-
-        Assert.AreEqual("3em", properties["border-right-width"]);
+        Assert.AreEqual("3em", GetProperty("border-right-width: 3em", "border-right-width"));
     }
 
     [TestMethod]
     public void BorderLeftWidthThickLegal()
     {
-        var properties = ParseDeclaration("border-left-width: thick !important");
-
-        Assert.AreEqual("thick", properties["border-left-width"]);
-        Assert.AreEqual(4d, CssValueParser.GetActualBorderWidth("thick", null!));
+        const string declaration = "border-left-width: thick !important";
+        Assert.AreEqual("5px", GetProperty(declaration, "border-left-width"));
+        Assert.AreEqual("important", GetPriority(declaration, "border-left-width"));
     }
 
     [TestMethod]
     public void BorderWidthMediumLegal()
     {
-        var properties = ParseDeclaration("border-width: medium");
+        const string declaration = "border-width: medium";
 
-        Assert.AreEqual("medium", properties["border-top-width"]);
-        Assert.AreEqual("medium", properties["border-right-width"]);
-        Assert.AreEqual("medium", properties["border-bottom-width"]);
-        Assert.AreEqual("medium", properties["border-left-width"]);
-        Assert.AreEqual(2d, CssValueParser.GetActualBorderWidth("medium", null!));
+        Assert.AreEqual("3px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("3px", GetProperty(declaration, "border-right-width"));
+        Assert.AreEqual("3px", GetProperty(declaration, "border-bottom-width"));
+        Assert.AreEqual("3px", GetProperty(declaration, "border-left-width"));
     }
 
     [TestMethod]
     public void BorderWidthLengthZeroLegal()
     {
-        var properties = ParseDeclaration("border-width: 3px   0");
+        const string declaration = "border-width: 3px   0";
 
-        Assert.AreEqual("3px", properties["border-top-width"]);
-        Assert.AreEqual("3px", properties["border-bottom-width"]);
-        Assert.AreEqual("0", properties["border-left-width"]);
-        Assert.AreEqual("0", properties["border-right-width"]);
+        Assert.AreEqual("3px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("3px", GetProperty(declaration, "border-bottom-width"));
+        Assert.AreEqual("0", GetProperty(declaration, "border-left-width"));
+        Assert.AreEqual("0", GetProperty(declaration, "border-right-width"));
     }
 
     [TestMethod]
     public void BorderWidthThinLengthLegal()
     {
-        var properties = ParseDeclaration("border-width: THIN   1px");
+        const string declaration = "border-width: THIN   1px";
 
-        Assert.AreEqual("thin", properties["border-top-width"]);
-        Assert.AreEqual("thin", properties["border-bottom-width"]);
-        Assert.AreEqual("1px", properties["border-left-width"]);
-        Assert.AreEqual("1px", properties["border-right-width"]);
+        Assert.AreEqual("1px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("1px", GetProperty(declaration, "border-bottom-width"));
+        Assert.AreEqual("1px", GetProperty(declaration, "border-left-width"));
+        Assert.AreEqual("1px", GetProperty(declaration, "border-right-width"));
     }
 
     [TestMethod]
     public void BorderWidthMediumThinThickLegal()
     {
-        var properties = ParseDeclaration("border-width: medium thin thick");
+        const string declaration = "border-width: medium thin thick";
 
-        Assert.AreEqual("medium", properties["border-top-width"]);
-        Assert.AreEqual("thin", properties["border-left-width"]);
-        Assert.AreEqual("thin", properties["border-right-width"]);
-        Assert.AreEqual("thick", properties["border-bottom-width"]);
+        Assert.AreEqual("3px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("1px", GetProperty(declaration, "border-left-width"));
+        Assert.AreEqual("1px", GetProperty(declaration, "border-right-width"));
+        Assert.AreEqual("5px", GetProperty(declaration, "border-bottom-width"));
     }
 
     [TestMethod]
     public void BorderWidthLengthLengthLengthLengthLegal()
     {
-        var properties = ParseDeclaration("border-width:  1px  2px   3px  4px  !important ");
+        const string declaration = "border-width:  1px  2px   3px  4px  !important ";
 
-        Assert.AreEqual("1px", properties["border-top-width"]);
-        Assert.AreEqual("2px", properties["border-right-width"]);
-        Assert.AreEqual("3px", properties["border-bottom-width"]);
-        Assert.AreEqual("4px", properties["border-left-width"]);
+        Assert.AreEqual("1px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("2px", GetProperty(declaration, "border-right-width"));
+        Assert.AreEqual("3px", GetProperty(declaration, "border-bottom-width"));
+        Assert.AreEqual("4px", GetProperty(declaration, "border-left-width"));
     }
 
     [TestMethod]
     public void BorderWidthLengthInEmZeroLegal()
     {
-        var properties = ParseDeclaration("border-width:  0.3em 0 ");
+        const string declaration = "border-width:  0.3em 0 ";
 
-        Assert.AreEqual("0.3em", properties["border-top-width"]);
-        Assert.AreEqual("0.3em", properties["border-bottom-width"]);
-        Assert.AreEqual("0", properties["border-left-width"]);
-        Assert.AreEqual("0", properties["border-right-width"]);
+        Assert.AreEqual("0.3em", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("0.3em", GetProperty(declaration, "border-bottom-width"));
+        Assert.AreEqual("0", GetProperty(declaration, "border-left-width"));
+        Assert.AreEqual("0", GetProperty(declaration, "border-right-width"));
     }
 
     [TestMethod]
     public void BorderWidthMediumZeroLengthThickLegal()
     {
-        var properties = ParseDeclaration("border-width:   medium 0 1px thick ");
+        const string declaration = "border-width:   medium 0 1px thick ";
 
-        Assert.AreEqual("medium", properties["border-top-width"]);
-        Assert.AreEqual("0", properties["border-right-width"]);
-        Assert.AreEqual("1px", properties["border-bottom-width"]);
-        Assert.AreEqual("thick", properties["border-left-width"]);
+        Assert.AreEqual("3px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("0", GetProperty(declaration, "border-right-width"));
+        Assert.AreEqual("1px", GetProperty(declaration, "border-bottom-width"));
+        Assert.AreEqual("5px", GetProperty(declaration, "border-left-width"));
     }
 
     [TestMethod]
     public void BorderWidthZerosIllegal()
     {
-        // SplitMultiDirectionValues only understands 1-4 values; a 5-value list matches none of its cases,
-        // so none of the border-*-width longhands get set at all (a real, silent no-op).
-        var properties = ParseDeclaration("border-width: 0 0 0 0 0");
+        // A 5-value list is invalid for a 1/2/3/4-value periodic shorthand, so none of the
+        // border-*-width longhands get set at all.
+        const string declaration = "border-width: 0 0 0 0 0";
 
-        Assert.IsFalse(properties.ContainsKey("border-top-width"));
-        Assert.IsFalse(properties.ContainsKey("border-right-width"));
-        Assert.IsFalse(properties.ContainsKey("border-bottom-width"));
-        Assert.IsFalse(properties.ContainsKey("border-left-width"));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-top-width")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-right-width")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-bottom-width")));
+        Assert.IsTrue(string.IsNullOrEmpty(GetProperty(declaration, "border-left-width")));
     }
 
-    // ── border/border-left/border-top/border-right/border-bottom (single-side shorthand) ───────────────────
+    // ── border (single-side shorthand: "border", and equally "border-left/top/right/bottom", which share
+    //    the exact same value grammar) - a longhand this shorthand's value didn't cover resolves to the
+    //    literal string "initial" per CSS Cascading (a shorthand always sets every longhand it manages,
+    //    explicitly or to its initial value), rather than being left unset the way the old positional
+    //    whitespace-tokenizer parser left it. ───────────────────────────────────────────────────────────
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
-    public void BorderLeftZeroLegal()
+    public void BorderZeroLegal()
     {
-        // PeachPDF: a bare "0" is a legal border width. HTML-Renderer's ParseBorderWidth only recognizes a
-        // bare number as a width when it is at least 3 characters long (a number plus a 2-character unit) or
-        // matches the "thin"/"medium"/"thick" keywords -- a bare unitless "0" token satisfies neither, so it
-        // is not currently recognized as a width at all. Target/intended behavior: width is parsed as "0".
-        ParseBorderShorthand("0", out var width, out var style, out var color);
+        // A bare "0" is a legal border width. The old ParseBorderWidth only recognized a bare number as
+        // a width when at least 3 characters long (a number plus a 2-character unit) or one of the
+        // thin/medium/thick keywords, so a bare unitless "0" wasn't recognized at all - restored here
+        // now that the real engine's LineWidthConverter handles it correctly.
+        const string declaration = "border: 0";
 
-        Assert.AreEqual("0", width);
-        Assert.IsNull(style);
-        Assert.IsNull(color);
-    }
-
-    [TestMethod]
-    public void BorderRightLineStyleLegal()
-    {
-        ParseBorderShorthand("dotted", out var width, out var style, out var color);
-
-        Assert.IsNull(width);
-        Assert.AreEqual("dotted", style);
-        Assert.IsNull(color);
+        Assert.AreEqual("0", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
-    public void BorderTopLengthRedLegal()
+    public void BorderLineStyleLegal()
     {
-        ParseBorderShorthand("2px red", out var width, out var style, out var color);
+        const string declaration = "border: dotted";
 
-        Assert.AreEqual("2px", width);
-        Assert.IsNull(style);
-        Assert.AreEqual("red", color);
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("dotted", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
-    public void BorderBottomRgbLegal()
+    public void BorderLengthRedLegal()
     {
-        // PeachPDF: "rgb(255, 100, 0)" is recognized as the border color. HTML-Renderer's ParseBorder
-        // tokenizes its value on whitespace only (CommonUtils.GetNextSubString has no notion of parentheses),
-        // so a color function containing internal spaces gets split into unrecognizable fragments
-        // ("rgb(255,", "100,", "0)") and none of them individually resolve to a width/style/color. Target/
-        // intended behavior: the whole function is recognized as the border color.
-        ParseBorderShorthand("rgb(255, 100, 0)", out var width, out var style, out var color);
+        const string declaration = "border :  2px red ";
 
-        Assert.IsNull(width);
-        Assert.IsNull(style);
-        Assert.AreEqual("rgb(255, 100, 0)", color);
+        Assert.AreEqual("2px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-top-color"));
+    }
+
+    [TestMethod]
+    public void BorderRgbLegal()
+    {
+        // "rgb(255, 100, 0)" is recognized as the border color. The old ParseBorder's whitespace-only
+        // tokenizer (CommonUtils.GetNextSubString has no notion of parentheses) split a color function
+        // containing internal spaces into unrecognizable fragments ("rgb(255,", "100,", "0)") that none
+        // individually resolved to a width/style/color - restored here now that the real engine's
+        // tokenizer correctly treats the whole function() as one token.
+        const string declaration = "border :  rgb(255, 100, 0) ";
+
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("rgb(255, 100, 0)", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
     public void BorderGrooveRgbLegal()
     {
-        // Same whitespace-tokenizer limitation as BorderBottomRgbLegal means the "rgb(255, 100, 0)" color
-        // is not recognized here either -- but the style keyword ("groove"), which is a standalone token,
-        // still parses correctly.
-        ParseBorderShorthand("GROOVE rgb(255, 100, 0)", out var width, out var style, out var color);
+        const string declaration = "border :  GROOVE rgb(255, 100, 0) ";
 
-        Assert.AreEqual("groove", style);
-        Assert.IsNull(width);
-        Assert.IsNull(color);
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("groove", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("rgb(255, 100, 0)", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
     public void BorderInsetGreenLengthLegal()
     {
-        ParseBorderShorthand("inset  green 3em", out var width, out var style, out var color);
+        const string declaration = "border :  inset  green 3em ";
 
-        Assert.AreEqual("3em", width);
-        Assert.AreEqual("inset", style);
-        Assert.AreEqual("green", color);
+        Assert.AreEqual("3em", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("inset", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("rgb(0, 128, 0)", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
     public void BorderRedSolidLengthLegal()
     {
-        ParseBorderShorthand("red  SOLID 1px", out var width, out var style, out var color);
+        const string declaration = "border :  red  SOLID 1px ";
 
-        Assert.AreEqual("1px", width);
-        Assert.AreEqual("solid", style);
-        Assert.AreEqual("red", color);
+        Assert.AreEqual("1px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("solid", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("rgb(255, 0, 0)", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
     public void BorderLengthBlackDoubleLegal()
     {
-        ParseBorderShorthand("0.5px black double", out var width, out var style, out var color);
+        const string declaration = "border :  0.5px black double ";
 
-        Assert.AreEqual("0.5px", width);
-        Assert.AreEqual("double", style);
-        Assert.AreEqual("black", color);
+        Assert.AreEqual("0.5px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("double", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("rgb(0, 0, 0)", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void BorderOutSetCurrentColor()
     {
-        // PeachPDF: "currentColor" is a legal color keyword. HTML-Renderer has no special handling for
-        // "currentColor" -- it is looked up like any other named color (via RAdapter.GetColor), which does
-        // not know that name and returns a fully transparent/invalid color, so it is rejected. Target/
-        // intended behavior: "currentColor" is recognized as the border color.
-        ParseBorderShorthand("1px outset currentColor", out var width, out var style, out var color);
+        // "currentColor" is now a legal color keyword, recognized as the border color - the old parser
+        // had no special handling for it (looked it up like any other named color, which the adapter
+        // doesn't know, so it was rejected).
+        const string declaration = "border: 1px outset currentColor";
 
-        Assert.AreEqual("1px", width);
-        Assert.AreEqual("outset", style);
-        Assert.AreEqual("currentColor", color);
+        Assert.AreEqual("1px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("outset", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("currentColor", GetProperty(declaration, "border-top-color"));
     }
 
     [TestMethod]
     public void BorderOutSetWithNoColor()
     {
-        ParseBorderShorthand("1px outset", out var width, out var style, out var color);
+        const string declaration = "border: 1px outset";
 
-        Assert.AreEqual("1px", width);
-        Assert.AreEqual("outset", style);
-        Assert.IsNull(color);
+        Assert.AreEqual("1px", GetProperty(declaration, "border-top-width"));
+        Assert.AreEqual("outset", GetProperty(declaration, "border-top-style"));
+        Assert.AreEqual("initial", GetProperty(declaration, "border-top-color"));
     }
 }

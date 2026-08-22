@@ -6,39 +6,31 @@ namespace HtmlRenderer.Test.Css;
 
 /// <summary>
 /// Ported from PeachPDF.Tests/CSS/CssSpecificityOrderingTests.cs.
-/// PeachPDF's <c>CssData</c> resolves matched rules in (specificity ascending, true document order),
-/// a real CSS specificity computation. HTML-Renderer's <see cref="TheArtOfDev.HtmlRenderer.Core.CssData"/>
-/// has no specificity concept at all: <see cref="TheArtOfDev.HtmlRenderer.Core.CssData.AddCssBlock"/>
-/// buckets blocks by selector class name and, within a bucket, always keeps selector-less ("general")
-/// blocks first and hierarchical-selector blocks appended in parse order - id/class/tag specificity and
-/// true cross-bucket source order (e.g. across the plain-rule/@media boundary) are not modeled. On top
-/// of that, <c>@media</c>-scoped rules parsed by <see cref="TheArtOfDev.HtmlRenderer.Core.Parse.CssParser"/>
-/// are stored under their own media key (see <c>ParseMediaStyleBlocks</c>) and are never looked up by
-/// <see cref="TheArtOfDev.HtmlRenderer.Core.Parse.DomParser"/> (which only ever calls
-/// <c>CssData.GetCssBlock(name)</c>, implicitly querying the "all" media bucket) - so an "@media print"
-/// rule never actually applies, regardless of specificity.
-/// All four tests are therefore marked <c>[Ignore]</c>: they document the target cascade-ordering
-/// behavior (mirroring the PeachPDF regression tests) for when/if real CSS specificity is implemented,
-/// but do not pass against the current engine.
+/// PeachPDF's <c>CssData</c> resolves matched rules in (specificity ascending, true document order), a
+/// real CSS specificity computation. HTML-Renderer's old <c>CssData</c> had no specificity concept at
+/// all - selector matching was bucketed by class name with no id/class/tag specificity and no true
+/// cross-bucket source order, and <c>@media</c>-scoped rules were stored under a separate key that
+/// <c>DomParser</c> never queried, so an "@media print" rule never actually applied regardless of
+/// specificity. The CSS engine port replaced all of that with the real thing: <see cref="TheArtOfDev.HtmlRenderer.Core.CssData.GetStyleRulesByOrigin"/>
+/// (via <c>GetMatchedSpecificity</c>) orders matched rules by real CSS specificity, tie-broken by true
+/// document order (assigned across the plain-rule/@media boundary by <c>IndexRules</c>), and <c>@media</c>
+/// is evaluated for real (see <see cref="TheArtOfDev.HtmlRenderer.Core.MediaQueryMatcher"/>). All four
+/// cases below now genuinely pass against the real engine and are un-ignored.
 /// </summary>
 [TestClass]
 public sealed class CssSpecificityOrderingTests
 {
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void HigherSpecificityRule_WinsEvenWhenDeclaredEarlier()
     {
         // #el (id, highest specificity) is declared FIRST; div (type, lowest specificity) is
-        // declared SECOND. Under HTML-Renderer's actual bucket-order behavior, whichever bucket
-        // ("#el" vs "div") the box happens to pick up last during CascadeApplyStyles wins - not
-        // specificity. Specificity must decide this, not declaration/bucket order.
+        // declared SECOND. Specificity decides this, not declaration order.
         var html = Html("#el { color: #0000ff; } div { color: #ff0000; }", "<div id='el'>text</div>");
         var box = FindBoxByTag(html, "div");
         Assert.AreEqual(RColor.FromArgb(0, 0, 255), box.ActualColor);
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void EqualSpecificity_SameOrigin_StillResolvesByLastDeclared()
     {
         var html = Html("div { color: #ff0000; } div { color: #0000ff; }", "<div>text</div>");
@@ -47,14 +39,12 @@ public sealed class CssSpecificityOrderingTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void MediaRuleDeclaredEarlier_LosesToEqualSpecificityPlainRuleDeclaredLater()
     {
         // The @media print block (containing a "div" rule) appears FIRST in the source; a plain
-        // "div" rule appears SECOND. In HTML-Renderer @media rules are parsed into a separate
-        // media bucket that DomParser never queries at all, so this can never resolve to the
-        // media rule's color no matter the ordering - it documents the target source-order
-        // behavior once @media support (and specificity) exist.
+        // "div" rule appears SECOND. LayoutHarness's default MockAdapter reports "screen" media, so
+        // the @media print rule doesn't apply at all here regardless of source order - this also
+        // exercises that a non-matching-media rule is correctly excluded even at equal specificity.
         var html = Html(
             "@media print { div { color: #0000ff; } } div { color: #ff0000; }",
             "<div>text</div>");
@@ -63,15 +53,12 @@ public sealed class CssSpecificityOrderingTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void CommaListRule_UsesOnlyTheMatchedBranchsSpecificity_NotASum()
     {
-        // The box matches ".a" (one class) but NOT "#b" (an id) in the list selector ".a, #b".
-        // HTML-Renderer's CssParser.FeedStyleBlock splits a comma-separated selector list into
-        // independent CssBlocks per class up front (one bucketed under ".a", another under "#b"),
-        // so there is no combined/summed specificity to get wrong in the first place - but there
-        // is also no real specificity computation to correctly outrank ".a.c" (two classes)
-        // either. Documents the target: ".a.c" (two classes) must win.
+        // The box matches ".a" (one class) but NOT "#b" (an id) in the list selector ".a, #b" - per
+        // GetMatchedSpecificity, a matched list selector's effective specificity is whichever
+        // alternative actually matched (".a"), not a summed/static max across the whole list, so
+        // ".a.c" (two classes - higher specificity than a single class) correctly wins.
         var html = Html(
             ".a, #b { color: #0000ff; } .a.c { color: #ff0000; }",
             "<div class='a c'>text</div>");

@@ -25,11 +25,13 @@ namespace HtmlRenderer.IntegrationTest.Painting;
 /// regardless of which edge the clip itself lands at (an auto-width/height child naturally stays within its
 /// parent's content box, which is always the smallest of the three candidate edges).
 ///
-/// Standard CSS <c>border-radius</c> (and every longhand) is not recognized anywhere in this fork's Core at all
-/// - see the sibling <c>BorderRadiusIntegrationTests</c> class's remarks - so PeachPDF's rounded-corner fixtures
-/// are re-expressed here using this fork's real (proprietary) <c>corner-radius</c>/<c>corner-*-radius</c>
-/// properties instead. Since border-radius (in either engine) only affects paint shape, never box geometry, this
-/// substitution does not change what any of the geometry assertions below are actually checking.
+/// Standard CSS <c>border-radius</c> (and its longhands) used to not be recognized anywhere in this fork's
+/// Core, so PeachPDF's rounded-corner fixtures were originally re-expressed here using this fork's then-only
+/// proprietary <c>corner-radius</c>/<c>corner-*-radius</c> properties instead. The CSS engine port added real,
+/// standard <c>border-radius</c> support (see the sibling <c>BorderRadiusIntegrationTests</c> class's remarks)
+/// and removed the proprietary mechanism entirely, so the fixtures below now use the real property directly.
+/// Since border-radius only affects paint shape, never box geometry, this substitution does not change what
+/// any of the geometry assertions below are actually checking.
 /// </remarks>
 [DoNotParallelize]
 [TestClass]
@@ -43,7 +45,7 @@ public sealed class OverflowClipIntegrationTests
         // Container: overflow:hidden, padding:10px, 100px content width. Child fills the content area.
         var (root, _) = PaintHarness.Layout(PaintHarness.Wrap(
             "<div id='outer' style='overflow:hidden; padding:10px; width:100px; height:100px;'>"
-            + "<div id='inner' style='height:80px; corner-radius:20px;'></div></div>"));
+            + "<div id='inner' style='height:80px; border-radius:20px;'></div></div>"));
 
         var outer = PaintHarness.FindById(root, "outer")!;
         var inner = PaintHarness.FindById(root, "inner")!;
@@ -63,7 +65,7 @@ public sealed class OverflowClipIntegrationTests
         // non-uniformly-rounded div fills the td content area.
         var (root, _) = PaintHarness.Layout(PaintHarness.Wrap(
             "<table style='border-collapse:collapse; width:300px;'><tr>"
-            + "<td id='cell' style='padding:3px;'><div id='box' style='corner-nw-radius:10px; corner-se-radius:30px; height:60px; border:2px solid black;'></div></td>"
+            + "<td id='cell' style='padding:3px;'><div id='box' style='border-top-left-radius:10px; border-bottom-right-radius:30px; height:60px; border:2px solid black;'></div></td>"
             + "</tr></table>"));
 
         var td = PaintHarness.FindById(root, "cell")!;
@@ -82,7 +84,7 @@ public sealed class OverflowClipIntegrationTests
     {
         var (root, _) = PaintHarness.Layout(PaintHarness.Wrap(
             "<table style='border-collapse:collapse; width:300px;'><tr>"
-            + "<td id='cell' style='padding:3px;'><div id='box' style='corner-radius:5px 15px 30px 45px; height:60px; border:2px solid black;'></div></td>"
+            + "<td id='cell' style='padding:3px;'><div id='box' style='border-radius:5px 15px 30px 45px; height:60px; border:2px solid black;'></div></td>"
             + "</tr></table>"));
 
         var td = PaintHarness.FindById(root, "cell")!;
@@ -120,12 +122,12 @@ public sealed class OverflowClipIntegrationTests
     {
         // Adapted from PeachPDF's PDF-generation smoke test - this fork has no PdfGenerator, so the equivalent
         // "must not throw" check is a plain layout + paint pass over several varied rounded-corner combinations
-        // inside table cells (using this fork's real corner-radius/corner-*-radius properties).
+        // inside table cells (using the real border-radius/border-*-radius properties).
         var (root, container) = PaintHarness.Layout(PaintHarness.Wrap(
             "<table id='t' style='border-collapse:collapse; width:400px;'><tr>"
-            + "<td style='padding:3px;'><div style='corner-radius:20px; height:60px; background:blue; border:2px solid #1a6b8a;'></div></td>"
-            + "<td style='padding:3px;'><div style='corner-nw-radius:10px; corner-se-radius:30px; height:60px; background:blue; border:2px solid #1a6b8a;'></div></td>"
-            + "<td style='padding:3px;'><div style='corner-radius:5px 15px 30px 45px; height:60px; background:blue; border:2px solid #1a6b8a;'></div></td>"
+            + "<td style='padding:3px;'><div style='border-radius:20px; height:60px; background:blue; border:2px solid #1a6b8a;'></div></td>"
+            + "<td style='padding:3px;'><div style='border-top-left-radius:10px; border-bottom-right-radius:30px; height:60px; background:blue; border:2px solid #1a6b8a;'></div></td>"
+            + "<td style='padding:3px;'><div style='border-radius:5px 15px 30px 45px; height:60px; background:blue; border:2px solid #1a6b8a;'></div></td>"
             + "</tr></table>"));
 
         var table = PaintHarness.FindById(root, "t")!;

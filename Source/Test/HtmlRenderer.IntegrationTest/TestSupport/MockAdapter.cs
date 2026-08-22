@@ -23,7 +23,8 @@ internal sealed class MockAdapter : RAdapter
 
     protected override RBrush CreateSolidBrush(RColor color) => new MockBrush(color);
 
-    protected override RBrush CreateLinearGradientBrush(RRect rect, RColor color1, RColor color2, double angle) => new MockBrush(color1);
+    protected override RBrush CreateLinearGradientBrush(RPoint p1, RPoint p2, (RColor Color, double Position)[] stops) =>
+        new MockBrush(stops.Length > 0 ? stops[0].Color : RColor.Black);
 
     protected override RImage ConvertImageInt(object image) => image as RImage ?? new MockImage(0, 0);
 
@@ -32,6 +33,8 @@ internal sealed class MockAdapter : RAdapter
     protected override RFont CreateFontInt(string family, double size, RFontStyle style) => new MockFont(size);
 
     protected override RFont CreateFontInt(RFontFamily family, double size, RFontStyle style) => new MockFont(size);
+
+    protected override RFontFamily LoadFontFaceFontInt(byte[] fontBytes, string filePath) => new MockFontFamily(filePath);
 }
 
 /// <summary>A pen that remembers the color it was created with.</summary>
@@ -66,4 +69,10 @@ internal sealed class MockFont(double size) : RFont
     public override double UnderlineOffset => size * 0.9;
     public override double LeftPadding => size * 0.2;
     public override double GetWhitespaceWidth(RGraphics graphics) => size * 0.25;
+}
+
+/// <summary>A font family stand-in for @font-face loading, independent of any real font file parsing.</summary>
+internal sealed class MockFontFamily(string name) : RFontFamily
+{
+    public override string Name => name;
 }

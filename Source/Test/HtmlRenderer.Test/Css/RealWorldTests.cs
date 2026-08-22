@@ -1,19 +1,25 @@
+using System.Linq;
 using HtmlRenderer.Test.TestSupport;
 using TheArtOfDev.HtmlRenderer.Adapters.Entities;
-using TheArtOfDev.HtmlRenderer.Core.Parse;
+using TheArtOfDev.HtmlRenderer.Core.Dom;
 
 namespace HtmlRenderer.Test.Css;
 
 /// <summary>
 /// Ported from PeachPDF.Tests/CSS/RealWorld.cs.
-/// PeachPDF's version parses a stylesheet with its <c>PeachPDF.CSS</c> engine (a fork of ExCSS)'s <c>StylesheetParser</c> and reads the
-/// parsed rule's properties back as CSSOM-normalized strings (e.g. "rgb(90, 94, 237)"). HTML-Renderer
-/// has no CSSOM: <see cref="CssParser"/> parses a stylesheet straight into <see cref="TheArtOfDev.HtmlRenderer.Core.CssData"/>
-/// buckets of raw (lower-cased) property strings, so colors are read back as parsed (e.g. "#5a5eed"),
-/// with <see cref="CssParser.ParseColor"/> used to also verify the resolved RGB value.
-/// The second PeachPDF test (CreateStylesheet_WithCssProperties_ExpectStandardStringBack) round-trips
-/// a rule back through <c>ToCss()</c> - there is no CSS serialization (CSSOM) in HTML-Renderer, so that
-/// test has no equivalent here and was dropped entirely.
+/// PeachPDF's version parses a stylesheet with its CSS engine's <c>StylesheetParser</c> and reads the
+/// parsed rule's properties back as CSSOM-normalized strings. HTML-Renderer's CSS engine port removed the
+/// old raw-bucket <c>CssData.GetCssBlock</c> introspection API this file originally used entirely -
+/// <c>CssData</c> is now purely a rule index queried during the real box-tree cascade (see
+/// <c>CssData.GetStyleRules</c>), not a standalone lookup surface. So instead of parsing a bare
+/// stylesheet and reading back its raw property strings, this test now drives the whole real pipeline
+/// end to end via <see cref="LayoutHarness"/> - <c>SetHtml</c>, layout, then read the resolved values off
+/// the laid-out <see cref="CssBox"/>es (<c>ActualBackgroundColor</c>/<c>ActualColor</c>/
+/// <c>ActualMargin*</c>), which is the closest real equivalent to "does this cascade actually resolve the
+/// way the stylesheet says it should".
+/// The second PeachPDF test (CreateStylesheet_WithCssProperties_ExpectStandardStringBack) round-trips a
+/// rule back through <c>ToCss()</c> - there is no CSS serialization (CSSOM) surface exposed on this fork,
+/// so that test still has no equivalent here and remains dropped.
 /// </summary>
 [TestClass]
 public sealed class RealWorldTests
@@ -21,36 +27,28 @@ public sealed class RealWorldTests
     [TestMethod]
     public void ParseCss_WithStandardString_ExpectReadableProperties()
     {
-        // Could read in a file here...
-        // Arrange
         const string css = "html{ background-color: #5a5eed; color: #FFFFFF; margin: 5px; } h2{ background-color: red }";
+        var html = $"<!DOCTYPE html><html><head><style>{css}</style></head><body><h2>Text</h2></body></html>";
 
-        var parser = new CssParser(new MockAdapter());
+        var (root, _) = LayoutHarness.Layout(html);
 
-        // Act
-        var cssData = parser.ParseStyleSheet(css, false);
+        var htmlBox = FindByTag(root, "html");
+        var h2Box = FindByTag(root, "h2");
 
-        var htmlBlock = cssData.GetCssBlock("html").First();
-        var h2Block = cssData.GetCssBlock("h2").First();
+        Assert.AreEqual(RColor.FromArgb(90, 94, 237), htmlBox.ActualBackgroundColor);
+        Assert.AreEqual(RColor.FromArgb(255, 255, 255), htmlBox.ActualColor);
+        Assert.AreEqual(5d, htmlBox.ActualMarginLeft);
+        Assert.AreEqual(5d, htmlBox.ActualMarginTop);
+        Assert.AreEqual(5d, htmlBox.ActualMarginRight);
+        Assert.AreEqual(5d, htmlBox.ActualMarginBottom);
 
-        var backgroundColor = htmlBlock.Properties["background-color"];
-        var foregroundColor = htmlBlock.Properties["color"];
+        Assert.AreEqual(RColor.FromArgb(255, 0, 0), h2Box.ActualBackgroundColor);
+    }
 
-        // Assert
-        Assert.AreEqual("html", htmlBlock.Class);
-        Assert.AreEqual("#5a5eed", backgroundColor);
-        Assert.AreEqual(RColor.FromArgb(90, 94, 237), parser.ParseColor(backgroundColor));
-        Assert.AreEqual("#ffffff", foregroundColor);
-        Assert.AreEqual(RColor.FromArgb(255, 255, 255), parser.ParseColor(foregroundColor));
-
-        // "margin" has no single longhand equivalent in HTML-Renderer - the shorthand is split into
-        // margin-left/top/right/bottom at parse time (CssParser.ParseMarginProperty).
-        Assert.AreEqual("5px", htmlBlock.Properties["margin-left"]);
-        Assert.AreEqual("5px", htmlBlock.Properties["margin-top"]);
-        Assert.AreEqual("5px", htmlBlock.Properties["margin-right"]);
-        Assert.AreEqual("5px", htmlBlock.Properties["margin-bottom"]);
-
-        Assert.AreEqual("h2", h2Block.Class);
-        Assert.AreEqual(RColor.FromArgb(255, 0, 0), parser.ParseColor(h2Block.Properties["background-color"]));
+    private static CssBox FindByTag(CssBox root, string tag)
+    {
+        var box = LayoutHarness.Descendants(root).FirstOrDefault(b => b.HtmlTag != null && b.HtmlTag.Name == tag);
+        Assert.IsNotNull(box);
+        return box!;
     }
 }

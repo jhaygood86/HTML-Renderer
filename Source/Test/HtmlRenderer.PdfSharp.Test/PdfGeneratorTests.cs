@@ -113,20 +113,20 @@ public sealed class PdfGeneratorTests
     }
 
     [TestMethod]
-    public void GeneratePdf_SimpleHtml_ProducesAtLeastOnePage()
+    public async Task GeneratePdf_SimpleHtml_ProducesAtLeastOnePage()
     {
         // Act
-        using var document = PdfGenerator.GeneratePdf("<p>Hello</p>", PageSize.A4);
+        using var document = await PdfGenerator.GeneratePdf("<p>Hello</p>", PageSize.A4);
 
         // Assert
         Assert.IsTrue(document.Pages.Count >= 1);
     }
 
     [TestMethod]
-    public void GeneratePdf_SimpleHtml_CanBeSaved()
+    public async Task GeneratePdf_SimpleHtml_CanBeSaved()
     {
         // Arrange
-        using var document = PdfGenerator.GeneratePdf("<p>Hello</p>", PageSize.A4);
+        using var document = await PdfGenerator.GeneratePdf("<p>Hello</p>", PageSize.A4);
 
         // Act
         using var stream = new MemoryStream();

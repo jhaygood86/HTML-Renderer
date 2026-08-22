@@ -1,115 +1,123 @@
 using System.Linq;
 using HtmlRenderer.Test.TestSupport;
-using TheArtOfDev.HtmlRenderer.Core;
+using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core.Dom;
 
 namespace HtmlRenderer.Test.Css;
 
 /// <summary>
 /// Ported from PeachPDF.Tests/CSS/PropertyTests/MediaQueryTests.cs.
-/// PeachPDF.CSS exposes a rich media-query object model (MediaRule.Media.Media, each with Type/IsInverse/
-/// IsExclusive). HTML-Renderer has no such model: <see cref="CssData"/> just buckets parsed CSS blocks by a
-/// literal media-type string key (see <see cref="TheArtOfDev.HtmlRenderer.Core.Parse.CssParser"/>'s private
-/// ParseMediaStyleBlocks), and the @media type list is split on <c>' '</c> (space) only -- never on ','. That
-/// means basic single-media-type rules ("@media print { ... }") work correctly, but "not"/"only" modifiers and
-/// comma-separated media lists do not: each whitespace-separated token (including "not", "only", and
-/// comma-suffixed type names like "print,") is treated as its own literal (and often bogus) media-type bucket.
+/// HTML-Renderer's CSS engine port added real <c>@media</c> evaluation: <see cref="TheArtOfDev.HtmlRenderer.Core.MediaQueryMatcher"/>
+/// evaluates a rule's enclosing <c>MediaList</c> chain (parsed by the vendored engine's real grammar,
+/// including "not"/"only" modifiers and comma-separated media lists - see <c>Medium.IsInverse</c> and a
+/// <c>MediaList</c>'s multiple comma-separated <c>Medium</c> entries) against a
+/// <see cref="TheArtOfDev.HtmlRenderer.Core.MediaQueryContext"/> built from <see cref="TheArtOfDev.HtmlRenderer.Adapters.RAdapter.DefaultMediaType"/>.
+/// The old standalone <c>CssData.GetCssBlock(name, media)</c>/<c>ContainsCssBlock(name, media)</c> bucket
+/// API this file originally used no longer exists at all - <c>CssData</c> is now purely a rule index
+/// queried per-box during the real cascade (<c>CssData.GetStyleRules</c>), so these tests instead drive
+/// the whole pipeline via <see cref="LayoutHarness"/> and read the resolved value off the laid-out box.
+/// <see cref="MockAdapter.MediaType"/> selects which device the layout runs under (mirroring how a real
+/// PdfSharpAdapter/WinFormsAdapter reports its own <c>DefaultMediaType</c>).
+/// Because "not"/"only" and comma-lists are now real, the three cases previously <c>[Ignore]</c>d as "not
+/// yet spec compliant" (the whitespace-only splitter mis-tokenizing them) now genuinely pass against the
+/// real grammar and are un-ignored below.
 /// </summary>
 [TestClass]
 public sealed class MediaQueryTests
 {
-    // NOTE: CssParser.RegexParserUtils.GetCssAtRules has an off-by-one boundary bug: when the
-    // matched at-rule's closing '}' is the very last character of the stylesheet, its computed
-    // end index equals stylesheet.Length and the "endIdx < stylesheet.Length" guard rejects it,
-    // so the whole @media block is silently dropped. Real-world stylesheets always have trailing
-    // whitespace/newlines after their last rule, so append a trailing newline here to exercise the
-    // @media support these tests actually target instead of tripping that incidental parser edge case.
-    private static CssData Parse(string stylesheet) => CssData.Parse(new MockAdapter(), stylesheet + "\n", false);
+    private static readonly RColor Red = RColor.FromArgb(255, 0, 0);
 
-    // ── basic single media type + nested rules (this genuinely works) ──────────────────────────────────
+    private static CssBox LayoutAndFindTag(string css, string bodyHtml, string tag, string mediaType)
+    {
+        var adapter = new MockAdapter { MediaType = mediaType };
+        var html = $"<!DOCTYPE html><html><head><style>{css}</style></head><body>{bodyHtml}</body></html>";
+        var (root, _) = LayoutHarness.Layout(html, adapter: adapter);
+        var box = LayoutHarness.Descendants(root).FirstOrDefault(b => b.HtmlTag != null && b.HtmlTag.Name == tag);
+        Assert.IsNotNull(box);
+        return box!;
+    }
+
+    // ── basic single media type + nested rules ──────────────────────────────────────────────────────────
 
     [TestMethod]
     public void AtMedia_Print_NestedRuleAppliesUnderPrintMedia()
     {
-        var cssData = Parse("@media print { p { color: red; } }");
+        var box = LayoutAndFindTag("@media print { p { color: red; } }", "<p>text</p>", "p", "print");
+        Assert.AreEqual(Red, box.ActualColor);
+    }
 
-        Assert.IsTrue(cssData.ContainsCssBlock("p", "print"));
-        var block = cssData.GetCssBlock("p", "print").First();
-        Assert.AreEqual("p", block.Class);
-        Assert.AreEqual("red", block.Properties["color"]);
-
-        // the rule is scoped to the "print" media bucket only
-        Assert.IsFalse(cssData.ContainsCssBlock("p", "screen"));
+    [TestMethod]
+    public void AtMedia_Print_DoesNotApplyUnderScreenMedia()
+    {
+        // the rule is scoped to the "print" media only - it must not leak into "screen".
+        var box = LayoutAndFindTag("@media print { p { color: red; } }", "<p>text</p>", "p", "screen");
+        Assert.AreNotEqual(Red, box.ActualColor);
     }
 
     [TestMethod]
     public void AtMedia_Screen_NestedRuleAppliesUnderScreenMedia()
     {
-        var cssData = Parse("@media screen { p { color: red; } }");
-
-        Assert.IsTrue(cssData.ContainsCssBlock("p", "screen"));
-        Assert.AreEqual("red", cssData.GetCssBlock("p", "screen").First().Properties["color"]);
+        var box = LayoutAndFindTag("@media screen { p { color: red; } }", "<p>text</p>", "p", "screen");
+        Assert.AreEqual(Red, box.ActualColor);
     }
 
     [TestMethod]
     public void AtMedia_All_NestedRuleAppliesUnderAllMedia()
     {
-        var cssData = Parse("@media all { p { color: red; } }");
-
-        Assert.IsTrue(cssData.ContainsCssBlock("p", "all"));
-        Assert.AreEqual("red", cssData.GetCssBlock("p", "all").First().Properties["color"]);
+        var box = LayoutAndFindTag("@media all { p { color: red; } }", "<p>text</p>", "p", "screen");
+        Assert.AreEqual(Red, box.ActualColor);
     }
 
     [TestMethod]
     public void AtMedia_Print_MultipleNestedRulesAreParsed()
     {
-        var cssData = Parse("@media print { p { color: red; } div { font-size: 12pt; } }");
+        const string css = "@media print { p { color: red; } div { font-size: 12pt; } }";
+        const string body = "<p>text</p><div>text</div>";
 
-        Assert.IsTrue(cssData.ContainsCssBlock("p", "print"));
-        Assert.IsTrue(cssData.ContainsCssBlock("div", "print"));
+        var pBox = LayoutAndFindTag(css, body, "p", "print");
+        Assert.AreEqual(Red, pBox.ActualColor);
+
+        var divBox = LayoutAndFindTag(css, body, "div", "print");
+        Assert.AreEqual("12pt", divBox.FontSize);
     }
 
-    // ── not / only modifiers -- not yet supported ───────────────────────────────────────────────────────
+    // ── "not" / "only" modifiers - now real ─────────────────────────────────────────────────────────────
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
-    public void AtMedia_NotPrint_NotYetSupported()
+    public void AtMedia_NotPrint_ExcludesPrintButAppliesElsewhere()
     {
-        // Intended: "@media not print" excludes the rule from the "print" media, so it should NOT show up
-        // under the "print" bucket. Actual: the @media type-list splitter divides on whitespace only, so
-        // "not" and "print" are each parsed as their own (literal) media-type token and the nested rule is
-        // registered under both the bogus "not" bucket AND the real "print" bucket -- i.e. the exclusion is
-        // lost and the rule incorrectly applies to print.
-        var cssData = Parse("@media not print { p { color: red; } }");
+        const string css = "@media not print { p { color: red; } }";
 
-        Assert.IsFalse(cssData.ContainsCssBlock("p", "print"));
+        var underPrint = LayoutAndFindTag(css, "<p>text</p>", "p", "print");
+        Assert.AreNotEqual(Red, underPrint.ActualColor);
+
+        var underScreen = LayoutAndFindTag(css, "<p>text</p>", "p", "screen");
+        Assert.AreEqual(Red, underScreen.ActualColor);
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
-    public void AtMedia_OnlyPrint_NotYetSupported()
+    public void AtMedia_OnlyPrint_AppliesOnlyUnderPrint()
     {
-        // Intended: "only" is just a modifier keyword, not a media type of its own, so no rule should ever
-        // be registered under a literal "only" bucket. Actual: the same whitespace-only splitter treats
-        // "only" as its own media-type token, so the nested rule gets registered under a bogus "only" bucket
-        // in addition to the real "print" bucket.
-        var cssData = Parse("@media only print { p { color: red; } }");
+        const string css = "@media only print { p { color: red; } }";
 
-        Assert.IsFalse(cssData.ContainsCssBlock("p", "only"));
+        var underPrint = LayoutAndFindTag(css, "<p>text</p>", "p", "print");
+        Assert.AreEqual(Red, underPrint.ActualColor);
+
+        var underScreen = LayoutAndFindTag(css, "<p>text</p>", "p", "screen");
+        Assert.AreNotEqual(Red, underScreen.ActualColor);
     }
 
-    // ── comma-separated media list -- not yet supported ─────────────────────────────────────────────────
+    // ── comma-separated media list - now real ───────────────────────────────────────────────────────────
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
-    public void AtMedia_PrintCommaScreen_NotYetSupported()
+    public void AtMedia_PrintCommaScreen_AppliesUnderBoth()
     {
-        // Intended: "@media print, screen" should register the nested rule under both "print" and "screen".
-        // Actual: the type-list splitter divides on whitespace only (not ','), so the comma stays attached
-        // to "print" (producing the bogus, comma-suffixed bucket "print,") while "screen" (no comma) happens
-        // to register correctly.
-        var cssData = Parse("@media print, screen { p { color: red; } }");
+        const string css = "@media print, screen { p { color: red; } }";
 
-        Assert.IsTrue(cssData.ContainsCssBlock("p", "print"));
-        Assert.IsTrue(cssData.ContainsCssBlock("p", "screen"));
+        var underPrint = LayoutAndFindTag(css, "<p>text</p>", "p", "print");
+        Assert.AreEqual(Red, underPrint.ActualColor);
+
+        var underScreen = LayoutAndFindTag(css, "<p>text</p>", "p", "screen");
+        Assert.AreEqual(Red, underScreen.ActualColor);
     }
 }

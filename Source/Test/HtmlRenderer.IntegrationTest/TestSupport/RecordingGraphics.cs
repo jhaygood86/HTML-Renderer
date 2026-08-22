@@ -10,7 +10,7 @@ internal sealed class MockGraphicsPath : RGraphicsPath
 
     public override void Start(double x, double y) => Points.Add(new RPoint(x, y));
     public override void LineTo(double x, double y) => Points.Add(new RPoint(x, y));
-    public override void ArcTo(double x, double y, double size, Corner corner) => Points.Add(new RPoint(x, y));
+    public override void ArcTo(double x, double y, double radiusX, double radiusY, Corner corner) => Points.Add(new RPoint(x, y));
     public override void Dispose() { }
 }
 

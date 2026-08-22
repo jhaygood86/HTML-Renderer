@@ -73,11 +73,6 @@ public sealed class BlockPlacementSeamTests
         Assert.AreEqual(a.ActualBottom, b.Location.Y, Delta);
     }
 
-    [Ignore("HTML-Renderer's block placement seam treats a floated sibling as an ordinary predecessor - it " +
-            "pushes 'b' down below the float's bottom (y=100) instead of leaving it beside/under the float at " +
-            "the float's own top (y=60, matching CSS2.1 floats not displacing following in-flow block starts). " +
-            "Confirmed by running this test: CssBox's placement logic does not special-case Position=float " +
-            "siblings the way it does display:none/absolute/fixed ones.")]
     [TestMethod]
     public void AFloatedSibling_IsNotThePredecessorTheFrameResolvesAgainst()
     {

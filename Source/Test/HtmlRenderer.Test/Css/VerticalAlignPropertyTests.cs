@@ -67,7 +67,6 @@ public sealed class VerticalAlignPropertyTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void VerticalAlignInvalidKeywordIllegal()
     {
         // PeachPDF: an invalid vertical-align keyword is rejected, so the property reports HasValue == false

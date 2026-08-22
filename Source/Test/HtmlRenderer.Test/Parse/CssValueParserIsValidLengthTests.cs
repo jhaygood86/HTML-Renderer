@@ -43,7 +43,6 @@ public sealed class CssValueParserIsValidLengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void Calc_ReturnsTrue_NotYetSpecCompliant()
     {
         // CSS Values and Units §8.1: calc() expressions are valid wherever a <length-percentage> is

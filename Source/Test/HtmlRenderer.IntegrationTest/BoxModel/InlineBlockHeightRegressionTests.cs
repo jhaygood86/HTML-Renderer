@@ -164,9 +164,6 @@ public sealed class InlineBlockHeightRegressionTests
             $"With no padding-top the rect top ({rect.Top}) must coincide with the word band top ({word.Top})");
     }
 
-    [Ignore("Requires a ::before pseudo-element with display:inline-block and generated content - this fork " +
-            "has no pseudo-element support at all (confirmed: no \"::before\"/\"::after\" handling anywhere " +
-            "in Core).")]
     [TestMethod]
     public void PaddedInlineBlockPseudoElement_WordsSitInsidePaddingBox()
     {
@@ -188,11 +185,6 @@ public sealed class InlineBlockHeightRegressionTests
             $"Pseudo-element label (top={word.Top}) must sit at least padding-top (6) below the box top ({rect.Top})");
     }
 
-    [Ignore("Relies on a page-fragmentation-aware inline-block/line placement pass (relocating a padded " +
-            "line that would straddle a page boundary once its own padding-top inset is applied). This " +
-            "fork's only page-break mechanism (CssBox.BreakPage) is invoked from CssLayoutEngineTable's row " +
-            "loop, gated behind an explicit page-break-inside:avoid on a <table> - there is no general " +
-            "page-boundary-aware placement for ordinary block/inline-block content like this <button>.")]
     [TestMethod]
     public void InsetShiftNearPageBoundary_WordsDoNotStraddleThePage()
     {

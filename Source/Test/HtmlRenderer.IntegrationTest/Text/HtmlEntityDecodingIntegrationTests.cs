@@ -176,9 +176,6 @@ public sealed class HtmlEntityDecodingIntegrationTests
 
     #region CSS Content Strings
 
-    [Ignore("Requires ::before/::after pseudo-elements with a CSS content: property - this fork has no " +
-            "pseudo-element support at all (confirmed: no \"::before\"/\"::after\"/pseudo-element handling " +
-            "anywhere in Core, only :link/:hover pseudo-CLASSES are recognized).")]
     [TestMethod]
     public void CssContentWithCssEscape_RendersLiterally()
     {
@@ -256,9 +253,6 @@ public sealed class HtmlEntityDecodingIntegrationTests
         Assert.AreEqual("&amp;nbsp;", JoinWordsNormal(p));
     }
 
-    [Ignore("HtmlUtils.DecodeHtml is only ever invoked from CssBox.ParseToWords (text-node word content) - " +
-            "grep confirms no other call site in Core decodes attribute values, so entities inside an " +
-            "attribute (e.g. title='A &amp; B') stay literally undecoded rather than becoming 'A & B'.")]
     [TestMethod]
     public void EntityInAttributeValue_DecodedCorrectly()
     {

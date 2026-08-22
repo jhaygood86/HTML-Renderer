@@ -146,7 +146,6 @@ public sealed class VerticalAlignIntegrationTests
         Assert.AreNotEqual(baselineY, middleY);
     }
 
-    [Ignore(InlineNoOpReason)]
     [TestMethod]
     public void TextTop_ReferencesParentFontAscent_NotJustLineTop()
     {
@@ -269,8 +268,6 @@ public sealed class VerticalAlignIntegrationTests
         Assert.IsTrue(raisedY < baselineY, $"raised={raisedY} baseline={baselineY}");
     }
 
-    [Ignore(InlineNoOpReason + " Numeric/percentage lengths have no case at all in the switch, so they fall " +
-            "to the same no-op default path.")]
     [TestMethod]
     public void Percentage_ResolvesAgainstTheBoxsOwnLineHeight()
     {

@@ -44,15 +44,6 @@ public sealed class HrPlacementTests
             Delta);
     }
 
-    [Ignore("DomUtils.GetPreviousSibling (Core/Utils/DomUtils.cs ~94-113) only skips display:none and " +
-            "position:absolute/fixed siblings when walking backwards for a placement predecessor - it does NOT " +
-            "skip a floated (position:static, float:left) sibling. So the float is treated as the rule's " +
-            "ordinary predecessor: MarginTopCollapse computes max(float's margin-bottom, hr's margin-top) instead " +
-            "of collapsing against the nearest in-flow block ('a'), and the rule's top ends up measured from the " +
-            "float's own box, not from 'a'. This is the exact same confirmed gap BlockPlacementSeamTests." +
-            "AFloatedSibling_IsNotThePredecessorTheFrameResolvesAgainst documents for ordinary blocks - " +
-            "CssBoxHr's copy of the placement formula shares the same DomUtils.GetPreviousSibling call and " +
-            "therefore the same bug.")]
     [TestMethod]
     public void AFloatedPredecessor_IsNotTheRulesMarginCollapsePartner()
     {

@@ -194,7 +194,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     [DataRow("None", "")]
     [DataRow("Ems", "em")]
     [DataRow("Pixels", "px")]
@@ -215,7 +214,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void ToPixel_ConvertsAbsoluteUnit()
     {
         // PeachPDF: length.ToPixel() resolves to the engine's internal layout unit, points:
@@ -244,7 +242,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void ToPixels_Pc_TwelvePointsPerPica()
     {
         // PeachPDF: length.ToPixels(0, 0, 0) for 1pc == 12 (12pt per pica). No ToPixels(...)
@@ -257,7 +254,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void To_ConvertsBetweenAbsoluteUnits()
     {
         // PeachPDF: length.To(Length.Unit.Px) for 1in == 96 (CSS px: 1px == 1/96in). No To(unit)
@@ -270,7 +266,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void To_In_ConvertsFromPoints()
     {
         var length = new CssLength("72pt");
@@ -281,7 +276,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void To_Mm_ConvertsFromPoints()
     {
         var length = new CssLength("72pt");
@@ -292,7 +286,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void To_Pc_ConvertsFromPoints()
     {
         var length = new CssLength("12pt");
@@ -303,7 +296,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void To_Pt_ReturnsSameValue()
     {
         var length = new CssLength("42pt");
@@ -314,7 +306,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void To_Cm_ConvertsFromPoints()
     {
         var length = new CssLength("72pt");
@@ -325,7 +316,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void To_RelativeTargetUnit_Throws()
     {
         // PeachPDF: length.To(Length.Unit.Em) throws for an absolute source length converting to a
@@ -337,7 +327,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void Equality_ComparesValueAndType()
     {
         // CssLength overrides neither Equals nor == in this fork (a==b/a.Equals(b) fall back to
@@ -353,7 +342,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void GetHashCode_SameForEqualLengths()
     {
         // No GetHashCode override exists in this fork (falls back to reference-based
@@ -367,7 +355,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void CompareTo_SameUnit_ComparesValue()
     {
         // No comparison operators/IComparable exist on CssLength in this fork - compare the raw
@@ -382,7 +369,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void CompareTo_DifferentAbsoluteUnits_ComparesInPixels()
     {
         // No cross-unit comparison exists on CssLength in this fork (no ToPixel/CompareTo) -
@@ -396,7 +382,6 @@ public sealed class LengthTests
     }
 
     [TestMethod]
-    [Ignore("not yet spec compliant")]
     public void ToString_WithFormatProvider()
     {
         // CssLength has no ToString(string, IFormatProvider) overload (IFormattable isn't

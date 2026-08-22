@@ -89,7 +89,6 @@ public sealed class TableVisibilityCollapseIntegrationTests
         AssertSameLocation(FindByClass(control, "c")!, FindByClass(experiment, "c")!);
     }
 
-    [Ignore(CollapseNotImplemented)]
     [TestMethod]
     public void RowspanCrossingCollapsedRow_DoesNotMisalignLaterRow()
     {
@@ -381,7 +380,6 @@ public sealed class TableVisibilityCollapseIntegrationTests
         Assert.AreEqual(FindByClass(control, "t")!.ActualRight, FindByClass(experiment, "t")!.ActualRight, 3);
     }
 
-    [Ignore(CollapseNotImplemented)]
     [TestMethod]
     public void CollapsedColumnGroup_CollapsesEveryColumnInsideIt()
     {
@@ -504,7 +502,6 @@ public sealed class TableVisibilityCollapseIntegrationTests
         AssertSameLocation(FindByClass(control, "c")!, FindByClass(experiment, "c")!);
     }
 
-    [Ignore(CollapseNotImplemented)]
     [TestMethod]
     public void ColspanCell_StraddlingCollapsedColumn_ContentDoesNotShareWidthWithIt()
     {

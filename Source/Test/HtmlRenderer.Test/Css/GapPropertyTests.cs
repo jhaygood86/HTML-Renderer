@@ -30,9 +30,9 @@ public sealed class GapPropertyTests
         var styleSheet = CssConstructionFunctions.ParseStyleSheet(source);
         var rule = (StyleRule)styleSheet.StyleRules.First();
 
-        Assert.AreEqual(rule.Style.Gap, propertyValue);
-        Assert.AreEqual(rule.Style.RowGap, expectedRowGap);
-        Assert.AreEqual(rule.Style.ColumnGap, expectedColumnGap);
+        Assert.AreEqual(propertyValue, rule.Style.Gap);
+        Assert.AreEqual(expectedRowGap, rule.Style.RowGap);
+        Assert.AreEqual(expectedColumnGap, rule.Style.ColumnGap);
     }
 
     [Ignore("not yet spec compliant: same missing-'normal' gap as GapAcceptsNormalKeyword - the periodic " +

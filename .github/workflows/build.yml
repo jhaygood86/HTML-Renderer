@@ -60,7 +60,13 @@ jobs:
 
     - name: Run Tests
       if: runner.os != 'Windows'
-      run: dotnet test Source/Test/**/*.Test.csproj --configuration Release --no-build --logger trx --results-directory ${{ github.workspace }}/TestResults
+      run: |
+        $failed = $false
+        Get-ChildItem -Path Source/Test -Recurse -Filter *.Test.csproj | ForEach-Object {
+          dotnet test $_.FullName --configuration Release --no-build --logger trx --results-directory ${{ github.workspace }}/TestResults
+          if ($LASTEXITCODE -ne 0) { $failed = $true }
+        }
+        if ($failed) { exit 1 }
       env:
         PDF_OUTPUT_DIRECTORY: ${{ github.workspace }}/pdf-artifacts/${{ matrix.platform.name }}-${{ matrix.dotnet.name }}
 

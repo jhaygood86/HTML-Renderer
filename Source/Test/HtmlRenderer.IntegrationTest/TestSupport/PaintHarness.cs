@@ -1,0 +1,75 @@
+using TheArtOfDev.HtmlRenderer.Adapters.Entities;
+using TheArtOfDev.HtmlRenderer.Core;
+using TheArtOfDev.HtmlRenderer.Core.Dom;
+
+namespace HtmlRenderer.IntegrationTest.TestSupport;
+
+/// <summary>
+/// A layout+paint harness for tests that need to verify the actual paint calls a box makes (DrawLine,
+/// DrawRectangle, colors, positions, ordering) rather than just resulting geometry. Uses the local
+/// <see cref="MockAdapter"/>/<see cref="RecordingGraphics"/> pair (deterministic word metrics, every draw call
+/// logged) instead of a real GDI+ surface, since real WinForms rendering has no way to intercept individual
+/// draw calls. Mirrors the shape of PeachPDF.Tests' FragmentPaintHarness/TestRecordingGraphics.
+/// </summary>
+internal static class PaintHarness
+{
+    /// <summary>Lays <paramref name="html"/> out using the recording mock adapter.</summary>
+    internal static (CssBox Root, HtmlContainerInt Container) Layout(
+        string html,
+        double maxWidth = 1000,
+        double maxHeight = 4000)
+    {
+        var container = new HtmlContainerInt(new MockAdapter())
+        {
+            MaxSize = new RSize(maxWidth, maxHeight),
+            Location = RPoint.Empty,
+            PageSize = new RSize(maxWidth, maxHeight)
+        };
+
+        container.SetHtml(html);
+
+        using var layoutGraphics = new RecordingGraphics();
+        container.PerformLayout(layoutGraphics);
+
+        Assert.IsNotNull(container.Root);
+
+        return (container.Root!, container);
+    }
+
+    /// <summary>Wraps a body fragment in a minimal document, so a test can state only the markup it cares about.</summary>
+    internal static string Wrap(string body) => $"<html><head></head><body style='margin:0'>{body}</body></html>";
+
+    /// <summary>Depth-first search for the box carrying <c>id="<paramref name="id"/>"</c>.</summary>
+    internal static CssBox? FindById(CssBox box, string id) => LayoutHarness.FindById(box, id);
+
+    /// <summary>
+    /// Paints a single box (and its descendants) the same way <see cref="HtmlContainerInt.PerformPaint"/> would
+    /// paint the whole tree - establishes the same initial clip, then paints just <paramref name="box"/> - and
+    /// returns a fresh <see cref="RecordingGraphics"/> with the resulting draw-call log.
+    /// </summary>
+    internal static RecordingGraphics PaintBox(HtmlContainerInt container, CssBox box)
+    {
+        var g = new RecordingGraphics();
+        PaintBox(container, box, g);
+        return g;
+    }
+
+    /// <summary>Same as <see cref="PaintBox(HtmlContainerInt, CssBox)"/> but reuses a caller-supplied graphics/log.</summary>
+    internal static void PaintBox(HtmlContainerInt container, CssBox box, RecordingGraphics g)
+    {
+        if (container.MaxSize.Height > 0)
+        {
+            g.PushClip(new RRect(container.Location.X, container.Location.Y,
+                Math.Min(container.MaxSize.Width, container.PageSize.Width),
+                Math.Min(container.MaxSize.Height, container.PageSize.Height)));
+        }
+        else
+        {
+            g.PushClip(new RRect(container.MarginLeft, container.MarginTop, container.PageSize.Width, container.PageSize.Height));
+        }
+
+        box.Paint(g);
+
+        g.PopClip();
+    }
+}

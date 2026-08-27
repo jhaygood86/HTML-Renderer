@@ -45,4 +45,7 @@ Features and Benefits:
   <ItemGroup>
     <ProjectReference Include="..\HtmlRenderer\HtmlRenderer.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HtmlRenderer.IntegrationTest" />
+  </ItemGroup>
 </Project>
